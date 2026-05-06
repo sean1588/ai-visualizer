@@ -1,0 +1,10 @@
+name: mise-app
+runtime:
+  name: nodejs
+  options:
+    typescript: true
+description: Mise app infra — S3 + CloudFront + Lambda Function URL on AWS
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: ""

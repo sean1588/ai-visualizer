@@ -1,0 +1,21 @@
+{
+  "name": "mise-app-infra",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "preview": "pulumi preview",
+    "up": "pulumi up --yes",
+    "destroy": "pulumi destroy --yes",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pulumi/aws": "^6.50.0",
+    "@pulumi/pulumi": "^3.130.0",
+    "@pulumi/synced-folder": "^0.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  }
+}
