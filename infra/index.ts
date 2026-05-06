@@ -100,15 +100,19 @@ const cookUrl = new aws.lambda.FunctionUrl("cook-url", {
   invokeMode: "BUFFERED",
 });
 
-// AuthType=NONE alone is not enough: AWS still rejects invocations without
-// an explicit resource-based permission allowing the * principal. Without
-// this, even CloudFront gets 403 when forwarding to the Function URL.
-new aws.lambda.Permission("cook-public-invoke", {
-  action: "lambda:InvokeFunctionUrl",
+// Public Function URLs need both lambda:InvokeFunctionUrl AND
+// lambda:InvokeFunction granted to "*". The Pulumi/Terraform Function URL
+// resource auto-creates the InvokeFunctionUrl statement, but invocations
+// still 403 without InvokeFunction (the AWS console flags this in the
+// Function URL UI). The principal "*" on InvokeFunction does not allow
+// unauthenticated AWS-API calls — those still require sigV4 signing — so
+// it's only consumed by Function URL invocations in practice.
+new aws.lambda.Permission("cook-public-invoke-function", {
+  action: "lambda:InvokeFunction",
   function: cookFn.name,
   principal: "*",
   functionUrlAuthType: "NONE",
-  statementId: "AllowPublicInvokeFunctionUrl",
+  statementId: "AllowPublicInvokeFunction",
 });
 
 // Strip "https://" and trailing "/" from the function URL for use as a CloudFront origin.
