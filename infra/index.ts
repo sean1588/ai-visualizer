@@ -100,6 +100,17 @@ const cookUrl = new aws.lambda.FunctionUrl("cook-url", {
   invokeMode: "BUFFERED",
 });
 
+// AuthType=NONE alone is not enough: AWS still rejects invocations without
+// an explicit resource-based permission allowing the * principal. Without
+// this, even CloudFront gets 403 when forwarding to the Function URL.
+new aws.lambda.Permission("cook-public-invoke", {
+  action: "lambda:InvokeFunctionUrl",
+  function: cookFn.name,
+  principal: "*",
+  functionUrlAuthType: "NONE",
+  statementId: "AllowPublicInvokeFunctionUrl",
+});
+
 // Strip "https://" and trailing "/" from the function URL for use as a CloudFront origin.
 const cookUrlHost = cookUrl.functionUrl.apply(u => u.replace(/^https?:\/\//, "").replace(/\/$/, ""));
 
