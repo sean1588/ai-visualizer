@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Mise · mise en place for your data</title>
+<meta name="description" content="Paste a CSV or JSON, get a dashboard you can keep. The schema is portable; the data stays yours." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400;1,9..144,500&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f5f2ec;
+    --bg-elev: #fbf9f4;
+    --bg-soft: #ede9df;
+    --fg: #1f1c16;
+    --fg-mute: #6e6759;
+    --rule: #1f1c16;
+    --rule-soft: #d9d3c4;
+    --accent: #8a3324;
+    --accent-2: #4a6651;
+    --accent-3: #b08a4a;
+    --accent-4: #3e4a6b;
+    --accent-fg: #fbf9f4;
+    --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+    --font-display: "Fraunces", Georgia, serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; min-height: 100vh; }
+
+  /* ─── chrome ─── */
+  .top { display: flex; align-items: center; justify-content: space-between; padding: 16px 32px; border-bottom: 1.5px solid var(--rule); background: var(--bg); }
+  .top-left { display: flex; align-items: center; gap: 14px; }
+  .mark { display: flex; align-items: baseline; gap: 7px; cursor: pointer; }
+  .mark-dot { background: var(--accent); border-radius: 50%; width: 9px; height: 9px; align-self: center; }
+  .mark-name { font-family: var(--font-display); font-style: italic; font-weight: 600; font-size: 20px; letter-spacing: -0.02em; }
+  .mark-name::after { content: "."; color: var(--accent); font-style: normal; }
+  .crumb-sep { color: var(--rule-soft); font-size: 13px; }
+  .crumb { font-family: var(--font-mono); font-size: 11px; color: var(--fg-mute); letter-spacing: 0.04em; }
+  .crumb-active { font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 14.5px; }
+  .top-right { display: flex; gap: 10px; align-items: center; }
+  .pill { border: 1px solid var(--rule); background: transparent; font-family: var(--font-mono); text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.1em; padding: 4px 9px; display: inline-flex; align-items: center; gap: 6px; color: var(--fg); }
+  .pill-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-2); }
+  .pill-dot.active { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  .btn { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; padding: 7px 14px; border-radius: 4px; border: 1px solid var(--rule); background: var(--bg-elev); color: var(--fg); cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+  .btn-primary { background: var(--rule); color: var(--bg); }
+  .btn-ghost { border-color: var(--rule-soft); }
+  .btn-lg { padding: 10px 20px; font-size: 12px; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .eyebrow { font-family: var(--font-mono); font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-mute); }
+  .eyebrow-accent { color: var(--accent); }
+
+  /* ─── empty state ─── */
+  .stage { display: none; }
+  .stage.is-active { display: block; }
+
+  .empty-body { display: grid; place-items: center; padding: 60px 32px 80px; }
+  .empty-card { width: 100%; max-width: 880px; }
+  .empty-eyebrow { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+  .empty-eyebrow::before { content: ""; width: 28px; height: 1.5px; background: var(--accent); }
+  .empty-card h1 { font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 44px; letter-spacing: -0.02em; line-height: 1.15; margin: 0 0 22px; max-width: 24ch; }
+  .empty-card .lede { color: var(--fg-mute); font-size: 16px; max-width: 60ch; margin: 0 0 28px; }
+
+  .drop { border: 1.5px dashed var(--rule); background: var(--bg-elev); padding: 48px 40px; text-align: center; transition: background 0.15s; }
+  .drop.is-hover { background: var(--bg-soft); border-color: var(--accent); }
+  .drop-icon { width: 56px; height: 56px; margin: 0 auto 18px; border: 1.5px solid var(--rule); border-radius: 4px; display: grid; place-items: center; background: var(--bg-soft); }
+  .drop h3 { font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 22px; margin: 0 0 6px; }
+  .drop p { color: var(--fg-mute); font-size: 14px; margin: 0 0 18px; }
+  .drop .or { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-mute); margin: 22px 0 14px; position: relative; }
+  .drop .or::before, .drop .or::after { content: ""; position: absolute; top: 50%; width: 80px; height: 1px; background: var(--rule-soft); }
+  .drop .or::before { left: calc(50% - 110px); }
+  .drop .or::after { right: calc(50% - 110px); }
+  .drop-cta-row { display: flex; gap: 12px; align-items: center; justify-content: center; margin-top: 4px; }
+  .drop-cta-meta { font-family: var(--font-mono); font-size: 11px; color: var(--fg-mute); letter-spacing: 0.04em; }
+
+  .recent-rail { margin-top: 32px; padding-top: 22px; border-top: 1px solid var(--rule-soft); }
+  .recent-rail-hd { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .recent-rail-clear { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-mute); background: transparent; border: none; cursor: pointer; padding: 4px 6px; }
+  .recent-rail-clear:hover { color: var(--accent); }
+  .recent-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+  .recent-card { padding: 14px 14px 12px; border: 1px solid var(--rule-soft); background: var(--bg-elev); cursor: pointer; transition: border-color 0.12s, transform 0.12s; }
+  .recent-card:hover { border-color: var(--rule); transform: translateY(-1px); }
+  .recent-card-title { font-family: var(--font-display); font-style: italic; font-size: 16px; line-height: 1.2; margin: 0 0 6px; color: var(--fg); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .recent-card-meta { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; color: var(--fg-mute); display: flex; justify-content: space-between; }
+  .drop-paste { width: 100%; max-width: 540px; margin: 0 auto; padding: 12px 14px; border: 1px solid var(--rule-soft); background: var(--bg); font-family: var(--font-mono); font-size: 12.5px; color: var(--fg); text-align: left; min-height: 90px; resize: vertical; outline: none; }
+  .drop-paste:focus { border-color: var(--rule); }
+  .drop-paste::placeholder { color: var(--fg-mute); }
+  .notes-row { width: 100%; max-width: 540px; margin: 14px auto 0; text-align: left; }
+  .notes-label { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+  .notes-key { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg); }
+  .notes-meta { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; color: var(--fg-mute); }
+  .drop-notes { width: 100%; padding: 10px 12px; border: 1px solid var(--rule-soft); background: var(--bg); font-family: var(--font-body); font-size: 13px; color: var(--fg); min-height: 56px; resize: vertical; outline: none; line-height: 1.5; }
+  .drop-notes:focus { border-color: var(--rule); }
+  .drop-notes::placeholder { color: var(--fg-mute); font-style: italic; }
+  .drop-actions { display: flex; gap: 8px; justify-content: center; align-items: center; margin-top: 14px; }
+  .drop-meta { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-mute); margin-top: 14px; }
+
+  .empty-foot { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; margin-top: 18px; border-top: 1px solid var(--rule-soft); flex-wrap: wrap; gap: 12px; }
+  .empty-foot-tip { font-family: var(--font-mono); font-size: 11px; color: var(--fg-mute); }
+  .empty-foot-tip kbd { font-family: var(--font-mono); font-size: 10.5px; padding: 2px 6px; border: 1px solid var(--rule-soft); border-radius: 3px; background: var(--bg-elev); margin: 0 2px; }
+  .empty-samples { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .sample-chip { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 11px; border: 1px solid var(--rule-soft); background: var(--bg-elev); color: var(--fg); cursor: pointer; }
+  .sample-chip:hover { background: var(--bg-soft); border-color: var(--rule); }
+
+  .err { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--accent); background: rgba(138,51,36,0.05); font-family: var(--font-mono); font-size: 11.5px; color: var(--accent); }
+
+  /* ─── loading ─── */
+  .loading-body { display: grid; grid-template-columns: 1fr 1px 1fr; min-height: 600px; }
+  .loading-divider { background: var(--rule-soft); }
+  .loading-left { padding: 60px 48px; display: flex; flex-direction: column; justify-content: center; }
+  .loading-left .eyebrow { margin-bottom: 16px; }
+  .loading-left h2 { font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 38px; letter-spacing: -0.02em; line-height: 1.05; margin: 0 0 14px; }
+  .loading-left .file { font-family: var(--font-mono); font-size: 12.5px; color: var(--fg); margin: 0 0 28px; padding: 10px 14px; border: 1px solid var(--rule-soft); background: var(--bg-elev); display: inline-flex; align-items: center; gap: 10px; max-width: 100%; }
+  .loading-steps { list-style: none; padding: 0; margin: 0; }
+  .loading-step { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px dashed var(--rule-soft); }
+  .loading-step:last-child { border-bottom: none; }
+  .step-mark { width: 18px; height: 18px; border: 1.5px solid var(--rule); border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; }
+  .step-done .step-mark { background: var(--rule); color: var(--bg); }
+  .step-active .step-mark { border-color: var(--accent); position: relative; }
+  .step-active .step-mark::after { content: ""; position: absolute; inset: 2px; border-radius: 50%; border: 1.5px solid var(--accent); border-top-color: transparent; animation: spin 0.9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .step-pending .step-mark { border-color: var(--rule-soft); }
+  .step-name { font-family: var(--font-display); font-style: italic; font-size: 16px; }
+  .step-pending .step-name { color: var(--fg-mute); }
+  .step-meta { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-mute); margin-left: auto; }
+  .loading-right { padding: 60px 48px; background: var(--bg-elev); display: flex; flex-direction: column; }
+  .schema-head { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 12px; border-bottom: 1px solid var(--rule-soft); margin-bottom: 16px; }
+  .schema-head h3 { font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 18px; margin: 0; }
+  .schema-cols { display: grid; gap: 2px; max-height: 360px; overflow: auto; }
+  .schema-col { display: grid; grid-template-columns: 24px 1fr 110px 90px; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px dashed var(--rule-soft); }
+  .schema-col:last-child { border-bottom: none; }
+  .schema-num { font-family: var(--font-mono); font-size: 10px; color: var(--fg-mute); }
+  .schema-name { font-family: var(--font-mono); font-size: 12px; }
+  .schema-type { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+  .schema-stat { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-mute); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ─── dashboard ─── */
+  .dash-head { padding: 22px 32px 16px; border-bottom: 1px solid var(--rule-soft); background: var(--bg); }
+  .dash-head h1 { font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 36px; letter-spacing: -0.02em; margin: 4px 0 6px; }
+  .dash-head-meta { font-family: var(--font-mono); font-size: 11px; color: var(--fg-mute); letter-spacing: 0.04em; }
+  .dash-grid { padding: 18px 32px 60px; display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
+  .w { background: var(--bg-elev); border: 1px solid var(--rule-soft); border-radius: 8px; padding: 22px; box-shadow: 0 1px 0 rgba(31,28,22,0.03); display: flex; flex-direction: column; min-height: 120px; }
+  .w-12 { grid-column: span 12; }
+  .w-8  { grid-column: span 8; }
+  .w-6  { grid-column: span 6; }
+  .w-4  { grid-column: span 4; }
+  .w-3  { grid-column: span 3; }
+  .w-hd { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 12px; border-bottom: 1px solid var(--rule-soft); margin-bottom: 16px; }
+  .w-hd h3 { font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 17px; margin: 0; letter-spacing: -0.005em; }
+  .w-hd .meta { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-mute); }
+
+  /* kpi */
+  .w-kpi { padding: 22px; }
+  .w-kpi .label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-mute); margin-bottom: 8px; }
+  .w-kpi .value { font-family: var(--font-display); font-weight: 400; font-size: 36px; letter-spacing: -0.025em; line-height: 1; }
+  .w-kpi .delta { font-family: var(--font-mono); font-size: 11px; color: var(--accent-2); margin-top: 8px; letter-spacing: 0.02em; }
+  .w-kpi .delta.neg { color: var(--accent); }
+
+  /* chart */
+  .w-chart svg { width: 100%; height: 200px; display: block; }
+  .w-chart svg.tall { height: 280px; }
+  .axis-line { stroke: var(--rule-soft); stroke-width: 1; }
+  .axis-tick { font-family: var(--font-mono); font-size: 9.5px; fill: var(--fg-mute); letter-spacing: 0.04em; }
+  .grid-line { stroke: var(--rule-soft); stroke-width: 0.5; stroke-dasharray: 2 3; }
+
+  /* table */
+  .w-table table { width: 100%; border-collapse: collapse; }
+  .w-table th { text-align: left; padding: 10px 8px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; border-bottom: 1px solid var(--rule); color: var(--fg); }
+  .w-table th.num { text-align: right; }
+  .w-table td { padding: 10px 8px; border-bottom: 1px dashed var(--rule-soft); font-size: 13px; }
+  .w-table td.num { text-align: right; font-family: var(--font-mono); font-size: 12px; }
+  .w-table td.bold { font-family: var(--font-display); font-style: italic; font-weight: 400; }
+  .badge { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; padding: 3px 8px; border-radius: 2px; background: var(--bg-soft); color: var(--fg); border: 1px solid var(--rule-soft); }
+  .badge.ok { background: rgba(74,102,81,0.12); color: var(--accent-2); border-color: var(--accent-2); }
+  .badge.warn { background: rgba(176,138,74,0.12); color: var(--accent-3); border-color: var(--accent-3); }
+  .badge.bad { background: rgba(138,51,36,0.10); color: var(--accent); border-color: var(--accent); }
+
+  /* observations widget */
+  .w-obs { background: var(--bg-soft); border-color: var(--rule); }
+  .obs-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
+  .obs-item { display: grid; grid-template-columns: 36px 1fr; gap: 16px; align-items: start; padding-bottom: 14px; border-bottom: 1px dashed var(--rule-soft); }
+  .obs-item:last-child { border-bottom: none; padding-bottom: 0; }
+  .obs-num { font-family: var(--font-mono); font-size: 11px; color: var(--accent); letter-spacing: 0.08em; padding-top: 4px; }
+
+  /* ─── The Chef · chat-to-edit panel ─── */
+  .chef-fab { position: fixed; right: 22px; bottom: 22px; z-index: 50; display: none; align-items: center; gap: 9px; padding: 12px 18px 12px 14px; background: var(--accent); color: var(--accent-fg); border: 1.5px solid var(--rule); border-radius: 999px; box-shadow: 4px 4px 0 var(--rule); font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: transform 0.12s, box-shadow 0.12s; }
+  .chef-fab:hover { transform: translate(-1px,-1px); box-shadow: 5px 5px 0 var(--rule); }
+  .chef-fab.is-visible { display: inline-flex; }
+  .chef-fab-glyph { width: 22px; height: 22px; border-radius: 50%; background: var(--bg); color: var(--accent); display: grid; place-items: center; font-family: var(--font-display); font-style: italic; font-size: 14px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; padding-bottom: 1px; }
+
+  .chef-panel { position: fixed; right: 22px; bottom: 22px; width: 420px; max-width: calc(100vw - 44px); max-height: calc(100vh - 80px); background: var(--bg); border: 1.5px solid var(--rule); box-shadow: 6px 6px 0 var(--rule); z-index: 60; display: none; flex-direction: column; }
+  .chef-panel.is-open { display: flex; }
+  .chef-hd { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1.5px solid var(--rule); background: var(--bg-soft); }
+  .chef-hd-l { display: flex; align-items: baseline; gap: 9px; }
+  .chef-hd-glyph { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--accent-fg); display: grid; place-items: center; font-family: var(--font-display); font-style: italic; font-size: 14px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; align-self: center; padding-bottom: 1px; }
+  .chef-hd-name { font-family: var(--font-display); font-style: italic; font-weight: 600; font-size: 19px; letter-spacing: -0.02em; }
+  .chef-hd-tag { font-family: var(--font-mono); font-size: 10px; color: var(--fg-mute); letter-spacing: 0.06em; text-transform: uppercase; }
+  .chef-close { background: transparent; border: none; cursor: pointer; color: var(--fg-mute); font-size: 18px; padding: 4px 6px; line-height: 1; }
+  .chef-close:hover { color: var(--accent); }
+
+  .chef-body { padding: 16px 18px; overflow-y: auto; flex: 1; min-height: 200px; max-height: 50vh; }
+  .chef-empty { text-align: center; padding: 18px 8px 8px; }
+  .chef-empty-eyebrow { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-mute); margin-bottom: 8px; }
+  .chef-empty-title { font-family: var(--font-display); font-style: italic; font-size: 22px; line-height: 1.25; color: var(--fg); margin: 0 0 14px; }
+  .chef-suggestions { display: grid; gap: 6px; margin-top: 12px; }
+  .chef-suggestion { font-family: var(--font-mono); font-size: 11px; color: var(--fg); background: var(--bg-elev); border: 1px solid var(--rule-soft); padding: 9px 11px; cursor: pointer; text-align: left; transition: border-color 0.12s, background 0.12s; line-height: 1.35; }
+  .chef-suggestion:hover { border-color: var(--rule); background: var(--bg-soft); }
+
+  .chef-msgs { display: grid; gap: 10px; }
+  .chef-msg-user { align-self: flex-end; max-width: 85%; padding: 9px 13px; background: var(--bg-elev); border: 1px solid var(--rule-soft); font-size: 13.5px; line-height: 1.4; color: var(--fg); margin-left: auto; }
+  .chef-msg-chef { align-self: flex-start; max-width: 92%; font-family: var(--font-display); font-style: italic; font-size: 15px; line-height: 1.35; color: var(--fg); padding: 4px 0; }
+  .chef-msg-chef .changes { display: block; margin-top: 6px; font-family: var(--font-mono); font-style: normal; font-size: 10.5px; color: var(--accent); letter-spacing: 0.04em; text-transform: uppercase; }
+  .chef-msg-thinking { font-family: var(--font-display); font-style: italic; font-size: 15px; color: var(--fg-mute); padding: 4px 0; display: flex; align-items: center; gap: 8px; }
+  .chef-msg-thinking::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: chefPulse 1s ease-in-out infinite; }
+  @keyframes chefPulse { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
+  .chef-msg-error { font-family: var(--font-mono); font-size: 11.5px; color: var(--accent); padding: 4px 0; line-height: 1.4; }
+  .chef-msg-chef .undo-btn { display: inline-block; margin-left: 8px; font-family: var(--font-mono); font-style: normal; font-size: 10.5px; color: var(--fg-mute); letter-spacing: 0.04em; text-transform: uppercase; background: transparent; border: none; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  .chef-msg-chef .undo-btn:hover { color: var(--accent); }
+  .chef-msg-chef.is-undone { opacity: 0.5; }
+  .chef-msg-chef.is-undone .undo-btn { display: none; }
+
+  /* widget-change pulse */
+  @keyframes wPulse {
+    0%   { box-shadow: 0 0 0 0 rgba(122,32,32,0.55), 0 1px 0 rgba(31,28,22,0.03); border-color: var(--accent); }
+    50%  { box-shadow: 0 0 0 6px rgba(122,32,32,0.0), 0 1px 0 rgba(31,28,22,0.03); border-color: var(--accent); }
+    100% { box-shadow: 0 0 0 0 rgba(122,32,32,0), 0 1px 0 rgba(31,28,22,0.03); border-color: var(--rule-soft); }
+  }
+  .w.is-changed { animation: wPulse 1.6s ease-out 1; }
+
+  .chef-input-row { display: flex; gap: 8px; padding: 12px 14px; border-top: 1.5px solid var(--rule); background: var(--bg-soft); }
+  .chef-input { flex: 1; padding: 9px 12px; border: 1px solid var(--rule-soft); background: var(--bg); font-family: var(--font-mono); font-size: 12.5px; color: var(--fg); outline: none; resize: none; min-height: 38px; max-height: 110px; line-height: 1.4; }
+  .chef-input:focus { border-color: var(--rule); }
+  .chef-send { padding: 0 14px; background: var(--accent); color: var(--accent-fg); border: 1.5px solid var(--rule); font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: transform 0.1s; }
+  .chef-send:hover:not(:disabled) { transform: translate(-1px,-1px); }
+  .chef-send:disabled { background: var(--bg-elev); color: var(--fg-mute); cursor: not-allowed; transform: none; }
+  .obs-text { font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 19px; line-height: 1.4; letter-spacing: -0.005em; color: var(--fg); }
+
+  /* fallback banner */
+  .w-banner { display: flex; align-items: center; gap: 18px; padding: 14px 20px; background: rgba(176,138,74,0.10); border-color: var(--accent-3); min-height: 0; }
+  .banner-eyebrow { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent-3); font-weight: 600; }
+  .banner-msg { font-size: 13.5px; color: var(--fg); }
+  @media (max-width: 980px) {
+    .loading-body { grid-template-columns: 1fr; }
+    .loading-divider { display: none; }
+    .w-3 { grid-column: span 6; }
+    .w-4 { grid-column: span 12; }
+    .w-6, .w-8 { grid-column: span 12; }
+  }
+
+  /* ─── Mobile · ≤640px ─────────────────────────────────────
+     Pre-launch baseline. Stack widgets, simplify topbar,
+     turn the chef into a bottom sheet, collapse notes. */
+  @media (max-width: 640px) {
+    /* topbar */
+    .top { padding: 12px 16px; gap: 10px; }
+    .top-left { gap: 8px; min-width: 0; flex: 1; }
+    .crumb-sep, #crumb { display: none; }
+    .top-right { gap: 6px; }
+    .top-right .pill { display: none; }
+    .top-right .btn { padding: 7px 10px; font-size: 10px; }
+
+    /* empty stage */
+    .empty-body { padding: 28px 16px 60px; }
+    .empty-card h1 { font-size: 30px; line-height: 1.1; }
+    .lede { font-size: 15px; }
+    .drop { padding: 28px 18px; }
+    .drop h3 { font-size: 19px; }
+    .drop-paste { min-height: 90px; font-size: 13px; }
+
+    /* notes — collapse by default, tap to expand */
+    .notes-row { position: relative; }
+    .drop-notes { min-height: 60px; max-height: 200px; font-size: 13px; }
+
+    /* loading */
+    .loading-left { padding: 32px 22px; }
+    .loading-right { padding: 24px 22px; }
+    #loading-title { font-size: 24px; }
+
+    /* dashboard */
+    .dash-head { padding: 28px 18px 12px; }
+    .dash-head h1 { font-size: 28px; }
+    .dash-grid { padding: 12px 14px 80px; gap: 10px; }
+    .w { padding: 16px; min-height: 0; }
+    .w-3, .w-4, .w-6, .w-8, .w-12 { grid-column: span 12; }
+
+    /* tighten widget headers */
+    .w-hd h3 { font-size: 15px; }
+    .kpi-value { font-size: 36px; }
+    .obs-item { grid-template-columns: 28px 1fr; gap: 12px; }
+    table { font-size: 12.5px; }
+    th, td { padding: 7px 8px; }
+
+    /* The Chef → bottom sheet */
+    .chef-fab {
+      right: 14px; bottom: 14px;
+      padding: 11px 16px 11px 12px;
+      font-size: 10.5px;
+    }
+    .chef-panel {
+      right: 0; bottom: 0; left: 0;
+      width: 100vw; max-width: 100vw;
+      max-height: 75vh;
+      border-left: none; border-right: none; border-bottom: none;
+      box-shadow: 0 -4px 0 var(--rule);
+      animation: chefSlideUp 220ms ease-out;
+    }
+    @keyframes chefSlideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    .chef-hd { padding: 12px 14px; }
+    .chef-hd-name { font-size: 17px; }
+    .chef-body { padding: 14px 14px; max-height: 50vh; }
+    .chef-empty-title { font-size: 18px; }
+    .chef-input-row { padding: 10px 12px; }
+    .chef-input { font-size: 12px; }
+
+    /* recents */
+    .recent-list { grid-template-columns: 1fr; }
+
+    /* observations */
+    .w-obs { padding: 18px; }
+
+    /* sample chips wrap nicely */
+    .empty-foot { flex-direction: column; align-items: flex-start; gap: 14px; }
+  }
+
+  /* Tighter topbar at the very narrow breakpoint */
+  @media (max-width: 380px) {
+    .top-right .btn { display: none; }
+    .top-right .btn:last-child { display: inline-flex; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-left">
+    <div class="mark" onclick="reset()"><span class="mark-dot"></span><span class="mark-name">Mise</span></div>
+    <span class="crumb-sep">/</span>
+    <span id="crumb" class="crumb-active" style="font-family:var(--font-display);font-style:italic;">New dashboard</span>
+  </div>
+  <div class="top-right">
+    <span id="status-pill" class="pill"><span class="pill-dot"></span>Local · not exported</span>
+    <button id="export-recipe-btn" class="btn btn-ghost" disabled title="Download the layout recipe as JSON">Recipe ↓</button>
+    <button id="export-btn" class="btn btn-ghost" disabled>Export PNG ↓</button>
+  </div>
+</header>
+
+<!-- ─── 01 EMPTY ─── -->
+<section id="stage-empty" class="stage is-active">
+  <div class="empty-body">
+    <div class="empty-card">
+      <div class="empty-eyebrow"><span class="eyebrow eyebrow-accent">A new dashboard</span></div>
+      <h1>Drop a file. Or paste your data.</h1>
+      <p class="lede">Mise reads the schema, lays out the widgets, and renders the dashboard right here in your browser. Nothing is uploaded; nothing is stored.</p>
+
+      <div id="drop" class="drop">
+        <div class="drop-icon">
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="#1f1c16" stroke-width="1.5"><path d="M11 14V4M11 4l-4 4M11 4l4 4M3 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+        </div>
+        <h3>Drop a file here</h3>
+        <p>CSV or JSON · or paste below</p>
+        <div class="drop-cta-row">
+          <button id="browse-btn" type="button" class="btn btn-ghost">Choose file…</button>
+          <input id="file-input" type="file" accept=".csv,.json,.txt,application/json,text/csv,text/plain" style="display:none;" />
+          <span class="drop-cta-meta" id="file-name">no file selected</span>
+        </div>
+        <div class="or"><span>or paste</span></div>
+        <textarea id="paste" class="drop-paste" placeholder='Paste JSON or CSV — e.g. [{"month":"Jan","revenue":42000}, ...]'></textarea>
+
+        <div class="notes-row">
+          <label for="notes" class="notes-label">
+            <span class="notes-key">Notes</span>
+            <span class="notes-meta">optional · nudges Claude’s layout</span>
+          </label>
+          <textarea id="notes" class="drop-notes" maxlength="1000" placeholder="e.g. Treat 'plan' as the primary segment. Highlight churn over 5%. Add a callout if revenue grew faster than headcount."></textarea>
+        </div>
+
+        <div class="drop-actions">
+          <button id="render-btn" class="btn btn-primary btn-lg">Render dashboard →</button>
+        </div>
+        <div class="drop-meta">Schema inferred locally · sent to inference once · never stored</div>
+        <div id="err" class="err" style="display:none;"></div>
+      </div>
+
+      <div id="recent-rail" class="recent-rail" style="display:none;">
+        <div class="recent-rail-hd">
+          <span class="eyebrow">Your plates · in this browser</span>
+          <button id="recent-clear" class="recent-rail-clear">Clear all</button>
+        </div>
+        <div id="recent-list" class="recent-list"></div>
+      </div>
+
+      <div class="empty-foot">
+        <div class="empty-foot-tip">tip — paste anywhere on the page <kbd>⌘V</kbd></div>
+        <div class="empty-samples">
+          <span class="eyebrow" style="margin-right:4px;">Try a sample →</span>
+          <span class="sample-chip" data-sample="saas">SaaS metrics</span>
+          <span class="sample-chip" data-sample="stripe">Stripe payouts</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── 02 LOADING ─── -->
+<section id="stage-loading" class="stage">
+  <div class="loading-body">
+    <div class="loading-left">
+      <div class="eyebrow eyebrow-accent" style="margin-bottom:14px;">— Reading the data —</div>
+      <h2 id="loading-title">We're getting to know your data.</h2>
+      <p style="color:var(--fg-mute);font-size:15px;margin:0 0 24px;">Schema first, layout second. We see your data once, decide what to render, then forget it.</p>
+      <div id="loading-file" class="file">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#1f1c16" stroke-width="1.4"><rect x="2" y="1" width="10" height="12"/><path d="M5 5h4M5 7h4M5 9h2"/></svg>
+        <span id="loading-file-text">data · — rows · — cols</span>
+      </div>
+      <ul class="loading-steps" id="loading-steps">
+        <li class="loading-step step-pending" data-step="parse"><span class="step-mark"></span><span class="step-name">Parse data</span><span class="step-meta">queued</span></li>
+        <li class="loading-step step-pending" data-step="infer"><span class="step-mark"></span><span class="step-name">Infer schema</span><span class="step-meta">queued</span></li>
+        <li class="loading-step step-pending" data-step="layout"><span class="step-mark"></span><span class="step-name">Propose layout</span><span class="step-meta">queued</span></li>
+        <li class="loading-step step-pending" data-step="render"><span class="step-mark"></span><span class="step-name">Render dashboard</span><span class="step-meta">queued</span></li>
+      </ul>
+    </div>
+    <div class="loading-divider"></div>
+    <div class="loading-right">
+      <div class="schema-head">
+        <h3>Inferred schema</h3>
+        <span id="schema-meta" class="eyebrow">— columns</span>
+      </div>
+      <div id="schema-cols" class="schema-cols"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── 03 DASHBOARD ─── -->
+<section id="stage-dash" class="stage">
+  <div class="dash-head">
+    <div class="eyebrow eyebrow-accent">— Dashboard —</div>
+    <h1 id="dash-title">Untitled dashboard</h1>
+    <div id="dash-meta" class="dash-head-meta">— rows · — cols · rendered locally</div>
+  </div>
+  <div id="dash-grid" class="dash-grid"></div>
+</section>
+
+<!-- ─── The Chef · chat-to-edit ─── -->
+<button id="chef-fab" class="chef-fab" type="button">
+  <span class="chef-fab-glyph">M</span>
+  <span>Talk to the chef</span>
+</button>
+
+<aside id="chef-panel" class="chef-panel" aria-label="The Chef">
+  <div class="chef-hd">
+    <div class="chef-hd-l">
+      <span class="chef-hd-glyph">M</span>
+      <span class="chef-hd-name">The Chef</span>
+    </div>
+    <button id="chef-close" class="chef-close" type="button" aria-label="Close">×</button>
+  </div>
+  <div id="chef-body" class="chef-body">
+    <div id="chef-empty" class="chef-empty">
+      <div class="chef-empty-eyebrow">Tell the chef what to change</div>
+      <p class="chef-empty-title">"Swap the donut for a bar chart, sorted by month."</p>
+      <div class="chef-suggestions">
+        <button class="chef-suggestion" data-prompt="Swap the donut for a bar chart">Swap the donut for a bar chart</button>
+        <button class="chef-suggestion" data-prompt="Hide the observations widget">Hide the observations widget</button>
+        <button class="chef-suggestion" data-prompt="Make the first KPI the hero metric — full width, larger">Promote the first KPI to a hero — full width</button>
+        <button class="chef-suggestion" data-prompt="Sort the table by date, descending, and limit to 20 rows">Sort the table by date desc, top 20</button>
+      </div>
+    </div>
+    <div id="chef-msgs" class="chef-msgs"></div>
+  </div>
+  <div class="chef-input-row">
+    <textarea id="chef-input" class="chef-input" rows="1" placeholder="Ask the chef to adjust…"></textarea>
+    <button id="chef-send" class="chef-send" type="button" disabled>Send</button>
+  </div>
+</aside>
+
+<script src="app.js"></script>
+</body>
+</html>

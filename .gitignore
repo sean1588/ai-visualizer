@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+
+# Unzipped handoff working copy — the canonical artifact is AiVisualizer.zip,
+# the consumed bits live in public/, notes/, etc.
+design_handoff_mise/

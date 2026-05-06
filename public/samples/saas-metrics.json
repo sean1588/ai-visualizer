@@ -1,0 +1,49 @@
+{
+  "summary": {
+    "label": "SaaS metrics · Q1 2026",
+    "rows": 24,
+    "currency": "USD"
+  },
+  "kpis": {
+    "mrr_total": 1842500,
+    "mrr_delta_pct": 12.4,
+    "active_accounts": 3427,
+    "active_accounts_delta": 218,
+    "nrr_pct": 118,
+    "nrr_delta_pts": 4,
+    "logo_churn_pct": 2.1,
+    "logo_churn_delta_pts": -0.4
+  },
+  "weekly": [
+    { "week": "2026-W01", "revenue": 412000, "new_accounts": 42, "churn": 8 },
+    { "week": "2026-W02", "revenue": 428000, "new_accounts": 51, "churn": 6 },
+    { "week": "2026-W03", "revenue": 441000, "new_accounts": 47, "churn": 9 },
+    { "week": "2026-W04", "revenue": 462000, "new_accounts": 58, "churn": 7 },
+    { "week": "2026-W05", "revenue": 478000, "new_accounts": 62, "churn": 11 },
+    { "week": "2026-W06", "revenue": 491000, "new_accounts": 55, "churn": 8 },
+    { "week": "2026-W07", "revenue": 512000, "new_accounts": 64, "churn": 10 },
+    { "week": "2026-W08", "revenue": 534000, "new_accounts": 71, "churn": 9 },
+    { "week": "2026-W09", "revenue": 549000, "new_accounts": 68, "churn": 12 },
+    { "week": "2026-W10", "revenue": 568000, "new_accounts": 73, "churn": 11 },
+    { "week": "2026-W11", "revenue": 587000, "new_accounts": 79, "churn": 8 },
+    { "week": "2026-W12", "revenue": 612000, "new_accounts": 84, "churn": 13 }
+  ],
+  "by_plan": [
+    { "plan": "Pro",        "accounts": 1948, "mrr": 1051000 },
+    { "plan": "Team",       "accounts": 982,  "mrr": 565000 },
+    { "plan": "Enterprise", "accounts": 187,  "mrr": 226500 },
+    { "plan": "Free",       "accounts": 310,  "mrr": 0 }
+  ],
+  "top_accounts": [
+    { "account": "Northwind Co",     "plan": "Enterprise", "mrr": 48200, "health": 92 },
+    { "account": "Lumon Industries", "plan": "Enterprise", "mrr": 42800, "health": 78 },
+    { "account": "Initech",          "plan": "Enterprise", "mrr": 38400, "health": 64 },
+    { "account": "Pied Piper",       "plan": "Team",       "mrr": 14200, "health": 88 },
+    { "account": "Hooli",            "plan": "Enterprise", "mrr": 36100, "health": 71 },
+    { "account": "Stark Industries", "plan": "Team",       "mrr": 12400, "health": 95 },
+    { "account": "Wayne Enterprises","plan": "Enterprise", "mrr": 33900, "health": 83 },
+    { "account": "Acme Corp",        "plan": "Pro",        "mrr": 4200,  "health": 56 },
+    { "account": "Cyberdyne",        "plan": "Team",       "mrr": 11800, "health": 67 },
+    { "account": "Soylent Corp",     "plan": "Pro",        "mrr": 3800,  "health": 72 }
+  ]
+}
