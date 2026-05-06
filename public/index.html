@@ -252,6 +252,45 @@
     .w-6, .w-8 { grid-column: span 12; }
   }
 
+  /* ─── Tablet · ≤768px ─────────────────────────────────────
+     The chef side panel becomes a bottom sheet here so iPad
+     portrait and large phones don't see a 420px slab eating
+     half the viewport. */
+  @media (max-width: 768px) {
+    .chef-panel {
+      right: 0; bottom: 0; left: 0;
+      width: 100vw; max-width: 100vw;
+      max-height: 75vh;
+      border-left: none; border-right: none; border-bottom: none;
+      box-shadow: 0 -4px 0 var(--rule);
+      animation: chefSlideUp 220ms ease-out;
+    }
+    @keyframes chefSlideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  }
+
+  /* ─── Notes collapse · ≤640px ─────────────────────────────
+     Native <details>; JS removes the [open] attribute on load
+     when the viewport is mobile-sized. */
+  .notes-row > .drop-notes { margin-top: 0; }
+  summary.notes-label { list-style: none; cursor: default; }
+  summary.notes-label::-webkit-details-marker { display: none; }
+  .notes-toggle-icon { display: none; }
+
+  @media (max-width: 640px) {
+    summary.notes-label { cursor: pointer; user-select: none; }
+    .notes-toggle-icon {
+      display: inline-flex;
+      width: 18px; height: 18px;
+      border: 1px solid var(--rule);
+      align-items: center; justify-content: center;
+      font-family: var(--font-mono);
+      font-size: 14px; line-height: 1;
+      color: var(--fg);
+      transition: transform 200ms ease;
+    }
+    details.notes-row[open] .notes-toggle-icon { transform: rotate(45deg); }
+  }
+
   /* ─── Mobile · ≤640px ─────────────────────────────────────
      Pre-launch baseline. Stack widgets, simplify topbar,
      turn the chef into a bottom sheet, collapse notes. */
@@ -295,21 +334,12 @@
     table { font-size: 12.5px; }
     th, td { padding: 7px 8px; }
 
-    /* The Chef → bottom sheet */
+    /* The Chef → tighter sizing on top of the 768px bottom-sheet rules */
     .chef-fab {
       right: 14px; bottom: 14px;
       padding: 11px 16px 11px 12px;
       font-size: 10.5px;
     }
-    .chef-panel {
-      right: 0; bottom: 0; left: 0;
-      width: 100vw; max-width: 100vw;
-      max-height: 75vh;
-      border-left: none; border-right: none; border-bottom: none;
-      box-shadow: 0 -4px 0 var(--rule);
-      animation: chefSlideUp 220ms ease-out;
-    }
-    @keyframes chefSlideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
     .chef-hd { padding: 12px 14px; }
     .chef-hd-name { font-size: 17px; }
     .chef-body { padding: 14px 14px; max-height: 50vh; }
@@ -371,13 +401,14 @@
         <div class="or"><span>or paste</span></div>
         <textarea id="paste" class="drop-paste" placeholder='Paste JSON or CSV — e.g. [{"month":"Jan","revenue":42000}, ...]'></textarea>
 
-        <div class="notes-row">
-          <label for="notes" class="notes-label">
+        <details class="notes-row" id="notes-details" open>
+          <summary class="notes-label">
+            <span class="notes-toggle-icon" aria-hidden="true">+</span>
             <span class="notes-key">Notes</span>
             <span class="notes-meta">optional · nudges Claude’s layout</span>
-          </label>
+          </summary>
           <textarea id="notes" class="drop-notes" maxlength="1000" placeholder="e.g. Treat 'plan' as the primary segment. Highlight churn over 5%. Add a callout if revenue grew faster than headcount."></textarea>
-        </div>
+        </details>
 
         <div class="drop-actions">
           <button id="render-btn" class="btn btn-primary btn-lg">Render dashboard →</button>

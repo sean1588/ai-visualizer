@@ -949,6 +949,24 @@ document.getElementById('recent-clear').addEventListener('click', e => {
 });
 renderRecents();
 
+// Notes block: open on desktop, collapsed on mobile (≤640px). Sync on resize
+// so a rotation or window-resize lands the user in the expected state. The
+// summary toggle is disabled on desktop so clicking the label doesn't
+// accidentally hide the textarea.
+const notesDetails = document.getElementById('notes-details');
+if (notesDetails) {
+  const mq = window.matchMedia('(max-width: 640px)');
+  const syncNotes = () => {
+    if (mq.matches) notesDetails.removeAttribute('open');
+    else notesDetails.setAttribute('open', '');
+  };
+  syncNotes();
+  mq.addEventListener('change', syncNotes);
+  notesDetails.querySelector('summary')?.addEventListener('click', e => {
+    if (!mq.matches) e.preventDefault();
+  });
+}
+
 // ─── The Chef · chat-to-edit ───────────────────────────────────────
 const chef = {
   history: [],   // [{role, content, changes?, prevRecipe?, undone?, msgId?}]
