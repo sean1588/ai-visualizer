@@ -190,11 +190,9 @@ const distribution = new aws.cloudfront.Distribution("site", {
       originRequestPolicyId: ORIGIN_REQUEST_VIEWER_EXCEPT_HOST,
     },
   ],
-  customErrorResponses: [
-    // SPA-style: serve index.html for 403/404 so the app handles routing.
-    { errorCode: 403, responseCode: 200, responsePagePath: "/index.html", errorCachingMinTtl: 10 },
-    { errorCode: 404, responseCode: 200, responsePagePath: "/index.html", errorCachingMinTtl: 10 },
-  ],
+  // No customErrorResponses: CloudFront would otherwise rewrite 403/404 from
+  // *any* origin (including the Lambda /api/* path) to index.html, masking
+  // real failures. The app is a single page; we don't need SPA-style fallback.
   restrictions: { geoRestriction: { restrictionType: "none" } },
   viewerCertificate: {
     acmCertificateArn: certValidated.certificateArn,
