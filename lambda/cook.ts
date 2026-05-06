@@ -87,7 +87,7 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
   const temperature = typeof payload.temperature === "number" ? payload.temperature : 0.0;
 
   const baseURL = process.env.LLM_BASE_URL || "https://openrouter.ai/api/v1";
-  const model = process.env.LLM_MODEL || "moonshotai/kimi-k2-thinking";
+  const model = process.env.LLM_MODEL || "moonshotai/kimi-k2.6";
   const apiKey = process.env.OPENROUTER_API_KEY || process.env.LLM_API_KEY;
   if (!apiKey) {
     return json(500, { error: "missing_api_key" });
