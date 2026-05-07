@@ -80,7 +80,10 @@ const cookFn = new aws.lambda.Function("cook", {
   role: lambdaRole.arn,
   handler: "cook.handler",
   code: new pulumi.asset.FileArchive(path.join(__dirname, "..", "lambda", "dist")),
-  timeout: 30,
+  // 60s gives reasoning models (e.g. Kimi K2.6) enough headroom to complete
+  // even when the chain-of-thought phase runs long. The handler itself is
+  // idle most of the time -- it's waiting on the upstream HTTP call.
+  timeout: 60,
   memorySize: 256,
   environment: {
     variables: {

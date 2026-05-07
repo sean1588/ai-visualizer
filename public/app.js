@@ -243,12 +243,14 @@ Rules:
 }
 
 async function planRecipe(rows, schema, notes) {
-  // Try Claude — give it 18s
+  // Try the LLM — give it 55s (Lambda timeout is 60s; leave headroom for
+  // network + parsing). Reasoning-capable models can be slow to respond
+  // even with reasoning suppressed.
   try {
     const prompt = buildPrompt(rows, schema, notes);
     const raw = await Promise.race([
       complete(prompt, 'plan'),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 18000))
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 55000))
     ]);
     const recipe = parseAndValidateRecipe(raw, schema, rows);
     if (recipe && recipe.widgets.length) return recipe;

@@ -139,6 +139,11 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
     // hitting finish_reason=length before emitting any content.
     max_tokens: 16384,
     temperature,
+    // OpenRouter unified reasoning control. We don't need extended reasoning
+    // for layout planning; this asks the model to skip / minimize the
+    // chain-of-thought phase, cutting latency dramatically on K2.6-class
+    // models. Models that don't support reasoning ignore the param.
+    reasoning: { exclude: true, effort: "low" },
     messages: [{ role: "user", content: prompt }],
   };
   // VERBOSE: log the exact upstream request payload (full prompt included).
