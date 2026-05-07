@@ -76,7 +76,7 @@ new aws.iam.RolePolicyAttachment("cook-role-basic", {
 });
 
 const cookFn = new aws.lambda.Function("cook", {
-  runtime: aws.lambda.Runtime.NodeJS20dX,
+  runtime: aws.lambda.Runtime.NodeJS22dX,
   role: lambdaRole.arn,
   handler: "cook.handler",
   code: new pulumi.asset.FileArchive(path.join(__dirname, "..", "lambda", "dist")),

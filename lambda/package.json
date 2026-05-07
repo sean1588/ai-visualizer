@@ -5,11 +5,14 @@
   "description": "Mise · stateless LLM proxy Lambda",
   "main": "dist/cook.js",
   "scripts": {
-    "build": "esbuild cook.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/cook.js --minify",
+    "build": "esbuild cook.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/cook.js --minify",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@sean.holung/minicode-sdk": "^0.0.1"
+  },
   "devDependencies": {
-    "@types/node": "^20.14.0",
+    "@types/node": "^22.10.0",
     "esbuild": "^0.23.0",
     "typescript": "^5.5.0"
   }
