@@ -80,10 +80,11 @@ const cookFn = new aws.lambda.Function("cook", {
   role: lambdaRole.arn,
   handler: "cook.handler",
   code: new pulumi.asset.FileArchive(path.join(__dirname, "..", "lambda", "dist")),
-  // 60s gives reasoning models (e.g. Kimi K2.6) enough headroom to complete
-  // even when the chain-of-thought phase runs long. The handler itself is
-  // idle most of the time -- it's waiting on the upstream HTTP call.
-  timeout: 60,
+  // 90s budget covers the SDK's default 3-attempt retry behavior (15s per
+  // attempt × 3 + ~2s of backoff = ~47s worst case) with comfortable
+  // headroom. The handler itself is idle most of the time — it's waiting
+  // on the upstream HTTP call.
+  timeout: 90,
   memorySize: 256,
   environment: {
     variables: {

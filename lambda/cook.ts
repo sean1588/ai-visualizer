@@ -11,7 +11,6 @@
 
 import {
   OpenAICompatibleModelClient,
-  type OutputSchema,
 } from "@sean.holung/minicode-sdk";
 
 type CookRequest = {
@@ -70,48 +69,13 @@ function rateLimit(ip: string): { allowed: boolean; retryAfter: number } {
   return { allowed: true, retryAfter: 0 };
 }
 
-// JSON Schema (draft 2020-12 subset) for the dashboard recipe the planner
-// returns. The SDK validates the model's output against this and surfaces a
-// structured `output` value, eliminating manual fence-stripping and ad-hoc
-// JSON parsing in the proxy. The browser still does its own validation
-// pass (checks columns exist, span sums, etc.) before rendering.
-const RECIPE_SCHEMA: OutputSchema = {
-  name: "deliver_recipe",
-  description: "Deliver the dashboard recipe as a single structured payload. Call exactly once.",
-  schema: {
-    type: "object",
-    properties: {
-      title: { type: "string", minLength: 1 },
-      widgets: {
-        type: "array",
-        minItems: 1,
-        items: {
-          type: "object",
-          properties: {
-            type: { enum: ["kpi", "line", "bar", "donut", "statlist", "table", "observations"] },
-            span: { enum: [3, 4, 6, 8, 12] },
-            title: { type: "string" },
-            fields: { type: "object" },
-            rationale: { type: "string" },
-            observations: {
-              type: "array",
-              items: { type: "string" },
-            },
-          },
-          required: ["type", "span", "title"],
-        },
-      },
-      observations: {
-        type: "array",
-        maxItems: 3,
-        items: { type: "string" },
-      },
-    },
-    required: ["title", "widgets"],
-  },
-};
-
-const SYSTEM_PROMPT_PLAN = "You are Mise, an editorial dashboard designer. Read the user message — it contains the data shape and any guidance — and deliver the layout via the deliver_recipe tool. Call deliver_recipe exactly once with a complete recipe; do not write prose.";
+// Restoring the planner prompt to instruct the model to return raw JSON; we
+// surface that string back to the client and the existing browser-side
+// parseAndValidateRecipe consumes it. We tried `outputSchema` (synthetic
+// respond-tool pattern) but Kimi K2.6 hangs when forced through tool
+// calling — likely a model-specific issue. Revisit when we either swap
+// models or the SDK adds better support for K2.6's tool semantics.
+const SYSTEM_PROMPT_PLAN = "You are Mise, an editorial dashboard designer. Read the user message — it contains the data shape, any guidance, and the JSON shape to return. Respond with ONLY the JSON object, no prose, no code fences.";
 
 const SYSTEM_PROMPT_CHEF = "You are The Chef, an editorial dashboard editor. Apply the user's request to the current recipe and return the updated recipe as JSON, following the schema in the user message.";
 
@@ -181,7 +145,6 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
 
   const isPlan = kind === "plan";
   const system = isPlan ? SYSTEM_PROMPT_PLAN : SYSTEM_PROMPT_CHEF;
-  const outputSchema = isPlan ? RECIPE_SCHEMA : undefined;
 
   // VERBOSE
   logEvent({
@@ -190,10 +153,12 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
     model,
     baseURL,
     promptLen: prompt.length,
-    structured: Boolean(outputSchema),
   });
 
-  const client = getClient(baseURL, apiKey, 50);
+  // Tight upstream timeout. The SDK retries up to 3× on timeouts/network
+  // errors; with 15s per attempt we worst-case ~46s, comfortably inside the
+  // 90s Lambda budget so we get a clean 502 instead of a hard kill.
+  const client = getClient(baseURL, apiKey, 15);
   const upstreamT0 = Date.now();
   let response;
   try {
@@ -203,8 +168,6 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
       messages: [{ role: "user", content: prompt }],
       tools: [],
       maxTokens: 16384,
-      reasoningEffort: "low",
-      outputSchema,
     });
   } catch (e) {
     const err = e instanceof Error ? e.message : "unknown";
@@ -221,20 +184,13 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
     return json(502, { error: "upstream", detail: err });
   }
   const upstreamMs = Date.now() - upstreamT0;
-
-  // For plan calls, the SDK validated the structured output for us — return
-  // it as a JSON string so the existing client-side parser can consume it
-  // unchanged. For chef calls (and anything else), return the model's text.
-  const text = isPlan && response.output !== undefined
-    ? JSON.stringify(response.output)
-    : response.text;
+  const text = response.text;
 
   // VERBOSE
   logEvent({
     event: "ok",
     kind,
     model,
-    structured: Boolean(outputSchema),
     upstreamMs,
     promptLen: prompt.length,
     responseLen: text.length,
@@ -243,8 +199,7 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
     cachedInputTokens: response.usage?.cachedInputTokens,
     status: 200,
     ms: Date.now() - t0,
-    output: response.output,
-    rawText: response.text,
+    rawText: text,
   });
   return json(200, { text });
 };
