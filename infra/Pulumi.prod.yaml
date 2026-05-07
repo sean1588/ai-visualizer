@@ -2,5 +2,5 @@ config:
   aws:region: us-west-2
   mise-app:domain: app.mise.seanholung.com
   mise-app:rootZone: seanholung.com
-  mise-app:llmModel: moonshotai/kimi-k2.6
+  mise-app:llmModel: openai/gpt-5.4-mini
   mise-app:llmBaseUrl: https://openrouter.ai/api/v1

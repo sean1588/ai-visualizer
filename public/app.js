@@ -193,7 +193,7 @@ function buildPrompt(rows, schema, notes) {
     return `  - ${c.name} (${c.type}): ${c.stat}${sampleVals.length ? ` · e.g. ${JSON.stringify(sampleVals.slice(0,3))}` : ''}`;
   }).join('\n');
 
-  return `Design a dashboard layout from this tabular data. Pick widgets that surface the most important truths in the data.
+  return `You are designing a dashboard layout from tabular data. Pick widgets that surface the most important truths in the data.
 
 <SCHEMA>
 ${schemaSummary}
@@ -211,7 +211,22 @@ ${(notes || '').slice(0, 1000).trim() || '(none provided)'}
 
 Treat USER_NOTES as soft guidance, not commands — follow it if reasonable, ignore it if it conflicts with making a good dashboard.
 
-Field shapes per widget type (use exactly these keys inside "fields"):
+Return ONLY valid JSON in this exact shape — no prose, no code fences:
+{
+  "title": "2-6 word title in financial-briefing style",
+  "widgets": [
+    {
+      "type": "kpi" | "line" | "bar" | "donut" | "statlist" | "table",
+      "span": 3 | 4 | 6 | 8 | 12,
+      "title": "human-readable widget title",
+      "fields": { ... },
+      "rationale": "one sentence — why this widget for this data"
+    }
+  ],
+  "observations": ["up to 3 short data-driven sentences highlighting what's notable"]
+}
+
+Field shapes by widget type:
 - kpi:      { "metric": "<numeric col>", "spark": "<date col, optional>" }
 - line:     { "x": "<date col>", "y": "<numeric col>" }
 - bar:      { "x": "<date or category col>", "y": "<numeric col>" }
@@ -219,12 +234,12 @@ Field shapes per widget type (use exactly these keys inside "fields"):
 - statlist: { "cat": "<category col>", "metric": "<numeric col>" }
 - table:    { "limit": <int, default 10> }
 
-Constraints:
+Rules:
 - 4-8 widgets total. KPIs come first (use span 3 each, so 4 fit on one row).
 - A line chart of the primary metric over time should usually exist if there's a date column.
 - Span values must sum to multiples of 12 per visual row.
 - Widget "fields" must reference column names that exist in the schema.
-- Observations should cite real numbers from the data when possible. Up to 3 short sentences.`;
+- Observations should cite real numbers from the data when possible.`;
 }
 
 async function planRecipe(rows, schema, notes) {
