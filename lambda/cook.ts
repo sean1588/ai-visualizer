@@ -11,6 +11,7 @@
 
 import {
   OpenAICompatibleModelClient,
+  OutputValidationError,
   type OutputSchema,
 } from "@sean.holung/minicode-sdk";
 
@@ -303,6 +304,7 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
   const client = getClient(baseURL, apiKey, 25);
   const upstreamT0 = Date.now();
   let response;
+  let validationFallbackText: string | undefined;
   try {
     response = await client.chat({
       model,
@@ -313,28 +315,57 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
       outputSchema,
     });
   } catch (e) {
-    const err = e instanceof Error ? e.message : "unknown";
     const upstreamMs = Date.now() - upstreamT0;
-    logEvent({
-      event: "error",
-      reason: "upstream_call_failed",
-      kind,
-      upstreamMs,
-      status: 502,
-      ms: Date.now() - t0,
-      err,
-    });
-    return json(502, { error: "upstream", detail: err });
+    if (e instanceof OutputValidationError) {
+      // Schema rejected the model's structured output. Surface the raw
+      // payload as text so the client-side validator can take a
+      // permissive pass (drops bad widgets, keeps good ones); if that
+      // also fails, the client has its deterministic fallback recipe.
+      // Log the validation errors so we can tighten the prompt.
+      // VERBOSE
+      logEvent({
+        event: "structured_output_invalid",
+        kind,
+        upstreamMs,
+        ms: Date.now() - t0,
+        validationErrors: e.errors,
+        raw: e.raw,
+      });
+      validationFallbackText = typeof e.raw === "string"
+        ? e.raw
+        : JSON.stringify(e.raw);
+    } else {
+      const err = e instanceof Error ? e.message : "unknown";
+      logEvent({
+        event: "error",
+        reason: "upstream_call_failed",
+        kind,
+        upstreamMs,
+        status: 502,
+        ms: Date.now() - t0,
+        err,
+      });
+      return json(502, { error: "upstream", detail: err });
+    }
   }
   const upstreamMs = Date.now() - upstreamT0;
 
-  // For plan calls, the SDK validated the structured output for us — return
-  // it as a JSON string so the existing client-side parser consumes it
-  // unchanged. If the model didn't call the synthetic tool (no `output`),
-  // fall through to whatever text it produced.
-  const text = isPlan && response.output !== undefined
-    ? JSON.stringify(response.output)
-    : response.text;
+  // Pick the response text in this priority:
+  //   1. Schema-validated structured output (best — already a valid recipe)
+  //   2. Model's raw structured output that failed validation (client tries
+  //      its permissive parse before falling back)
+  //   3. Model's raw text reply (for non-plan kinds, or when the model didn't
+  //      use the synthetic tool at all)
+  let text: string;
+  if (response && isPlan && response.output !== undefined) {
+    text = JSON.stringify(response.output);
+  } else if (validationFallbackText !== undefined) {
+    text = validationFallbackText;
+  } else if (response) {
+    text = response.text;
+  } else {
+    text = "";
+  }
 
   // VERBOSE
   logEvent({
@@ -342,16 +373,18 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
     kind,
     model,
     structured: Boolean(outputSchema),
+    schemaValidated: Boolean(response?.output),
+    fellBackToRaw: validationFallbackText !== undefined,
     upstreamMs,
     promptLen: prompt.length,
     responseLen: text.length,
-    promptTokens: response.usage?.inputTokens,
-    completionTokens: response.usage?.outputTokens,
-    cachedInputTokens: response.usage?.cachedInputTokens,
+    promptTokens: response?.usage?.inputTokens,
+    completionTokens: response?.usage?.outputTokens,
+    cachedInputTokens: response?.usage?.cachedInputTokens,
     status: 200,
     ms: Date.now() - t0,
-    output: response.output,
-    rawText: response.text,
+    output: response?.output,
+    rawText: response?.text,
   });
   return json(200, { text });
 };
