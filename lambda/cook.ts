@@ -1,7 +1,13 @@
 // Mise · /api/cook — stateless LLM proxy.
 // Receives { prompt, kind } from the browser, forwards to an OpenAI-compatible
-// endpoint, returns { text }. Never logs prompt or response content — only
-// metadata (method, kind, status, duration, upstream status, error reason).
+// endpoint, returns { text }.
+//
+// !! PRE-LAUNCH DIAGNOSTIC LOGGING !!
+// Currently logs full prompt content, upstream request body, upstream response,
+// and our outbound response — for debugging while no real users are hitting
+// the proxy. Before public launch, dial back to structured-only logs (no body
+// content) to honor the "nothing leaves your browser except one stateless LLM
+// call, never logged" privacy claim. Search for `// VERBOSE` markers below.
 
 type CookRequest = {
   prompt?: unknown;
@@ -86,13 +92,25 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
   }
 
   let payload: CookRequest;
+  let raw = "";
   try {
-    const raw = event.isBase64Encoded ? Buffer.from(event.body || "", "base64").toString("utf-8") : (event.body || "");
+    raw = event.isBase64Encoded ? Buffer.from(event.body || "", "base64").toString("utf-8") : (event.body || "");
     payload = JSON.parse(raw || "{}");
-  } catch {
-    logEvent({ event: "rejected", reason: "invalid_json", status: 400, ms: Date.now() - t0 });
+  } catch (e) {
+    const err = e instanceof Error ? e.message : "unknown";
+    // VERBOSE: include full body on parse error to debug malformed clients.
+    logEvent({ event: "rejected", reason: "invalid_json", status: 400, ms: Date.now() - t0, err, rawBody: raw.slice(0, 4000) });
     return json(400, { error: "invalid_json" });
   }
+  // VERBOSE: log incoming request shape (kind, prompt length, headers).
+  logEvent({
+    event: "request_received",
+    method,
+    ip,
+    kind: typeof payload.kind === "string" ? payload.kind : "unknown",
+    headers: event.headers,
+    body: payload,
+  });
 
   const kind = typeof payload.kind === "string" ? payload.kind : "unknown";
   const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
@@ -113,7 +131,21 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
   const referer = process.env.OPENROUTER_REFERER || "https://app.mise.seanholung.com";
   const appTitle = process.env.OPENROUTER_TITLE || "Mise";
 
-  logEvent({ event: "upstream_start", kind, model, promptLen: prompt.length });
+  const upstreamBody = {
+    model,
+    max_tokens: 2048,
+    temperature,
+    messages: [{ role: "user", content: prompt }],
+  };
+  // VERBOSE: log the exact upstream request payload (full prompt included).
+  logEvent({
+    event: "upstream_start",
+    kind,
+    model,
+    baseURL,
+    promptLen: prompt.length,
+    upstreamBody,
+  });
 
   const upstreamT0 = Date.now();
   let upstream: Response;
@@ -127,12 +159,7 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
         "http-referer": referer,
         "x-title": appTitle,
       },
-      body: JSON.stringify({
-        model,
-        max_tokens: 2048,
-        temperature,
-        messages: [{ role: "user", content: prompt }],
-      }),
+      body: JSON.stringify(upstreamBody),
     });
   } catch (e) {
     const err = e instanceof Error ? e.message : "unknown";
@@ -141,21 +168,41 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
   }
   const upstreamMs = Date.now() - upstreamT0;
 
+  // Read body as text first so we can log it on failures regardless of JSON validity.
+  const upstreamText = await upstream.text();
+
   if (!upstream.ok) {
-    // Surface a generic error; do not echo upstream body (may contain prompt fragments).
-    logEvent({ event: "error", reason: "upstream", upstreamStatus: upstream.status, upstreamMs, status: 502, ms: Date.now() - t0 });
+    // VERBOSE: log full upstream error body to diagnose model/auth/quota issues.
+    logEvent({
+      event: "error",
+      reason: "upstream",
+      upstreamStatus: upstream.status,
+      upstreamMs,
+      upstreamBody: upstreamText.slice(0, 8000),
+      status: 502,
+      ms: Date.now() - t0,
+    });
     return json(502, { error: "upstream", status: upstream.status });
   }
 
   let upstreamJson: any;
   try {
-    upstreamJson = await upstream.json();
+    upstreamJson = JSON.parse(upstreamText);
   } catch {
-    logEvent({ event: "error", reason: "upstream_bad_json", upstreamStatus: upstream.status, upstreamMs, status: 502, ms: Date.now() - t0 });
+    logEvent({
+      event: "error",
+      reason: "upstream_bad_json",
+      upstreamStatus: upstream.status,
+      upstreamMs,
+      upstreamBody: upstreamText.slice(0, 8000),
+      status: 502,
+      ms: Date.now() - t0,
+    });
     return json(502, { error: "upstream_bad_json" });
   }
   const text: string = upstreamJson?.choices?.[0]?.message?.content || "";
   const usage = upstreamJson?.usage || {};
+  // VERBOSE: log full upstream JSON + response we're sending back.
   logEvent({
     event: "ok",
     kind,
@@ -169,6 +216,8 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
     totalTokens: usage.total_tokens,
     status: 200,
     ms: Date.now() - t0,
+    upstreamJson,
+    outboundText: text,
   });
   return json(200, { text });
 };
