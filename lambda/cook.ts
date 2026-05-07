@@ -133,7 +133,11 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
 
   const upstreamBody = {
     model,
-    max_tokens: 2048,
+    // Generous budget so reasoning models (e.g. Kimi K2.6) have room for both
+    // their internal reasoning tokens AND the final JSON response. With the
+    // previous 2048-token cap, K2.6 was burning ~1800 tokens on reasoning and
+    // hitting finish_reason=length before emitting any content.
+    max_tokens: 16384,
     temperature,
     messages: [{ role: "user", content: prompt }],
   };
