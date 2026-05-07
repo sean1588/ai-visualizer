@@ -11,6 +11,7 @@
 
 import {
   OpenAICompatibleModelClient,
+  type OutputSchema,
 } from "@sean.holung/minicode-sdk";
 
 type CookRequest = {
@@ -69,13 +70,152 @@ function rateLimit(ip: string): { allowed: boolean; retryAfter: number } {
   return { allowed: true, retryAfter: 0 };
 }
 
-// Restoring the planner prompt to instruct the model to return raw JSON; we
-// surface that string back to the client and the existing browser-side
-// parseAndValidateRecipe consumes it. We tried `outputSchema` (synthetic
-// respond-tool pattern) but Kimi K2.6 hangs when forced through tool
-// calling — likely a model-specific issue. Revisit when we either swap
-// models or the SDK adds better support for K2.6's tool semantics.
-const SYSTEM_PROMPT_PLAN = "You are Mise, an editorial dashboard designer. Read the user message — it contains the data shape, any guidance, and the JSON shape to return. Respond with ONLY the JSON object, no prose, no code fences.";
+// Strict JSON Schema (draft 2020-12) for the recipe. Per-widget oneOf
+// enforces the right `fields` shape per type; additionalProperties:false
+// rejects hallucinated keys like "subtitle" or per-widget "observation".
+// gpt-5.4-mini handles tool-calling cleanly; revisit on K2.6 only after
+// the SDK adds reasoning:{exclude:true} or we move K2.6 off this path.
+const widgetBase = {
+  span: { enum: [3, 4, 6, 8, 12] },
+  title: { type: "string" },
+  rationale: { type: "string" },
+};
+const widgetCommonRequired = ["type", "span", "title", "fields"];
+
+const RECIPE_SCHEMA: OutputSchema = {
+  name: "deliver_recipe",
+  description: "Deliver the dashboard recipe as a single structured payload. Call this tool exactly once.",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      title: { type: "string", minLength: 1 },
+      widgets: {
+        type: "array",
+        minItems: 1,
+        maxItems: 8,
+        items: {
+          oneOf: [
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                ...widgetBase,
+                type: { const: "kpi" },
+                fields: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    metric: { type: "string", description: "Numeric column name to aggregate." },
+                    spark: { type: "string", description: "Optional date column for the sparkline." },
+                  },
+                  required: ["metric"],
+                },
+              },
+              required: widgetCommonRequired,
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                ...widgetBase,
+                type: { const: "line" },
+                fields: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    x: { type: "string", description: "Date column." },
+                    y: { type: "string", description: "Numeric column." },
+                  },
+                  required: ["x", "y"],
+                },
+              },
+              required: widgetCommonRequired,
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                ...widgetBase,
+                type: { const: "bar" },
+                fields: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    x: { type: "string", description: "Date or category column." },
+                    y: { type: "string", description: "Numeric column." },
+                  },
+                  required: ["x", "y"],
+                },
+              },
+              required: widgetCommonRequired,
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                ...widgetBase,
+                type: { const: "donut" },
+                fields: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    cat: { type: "string", description: "Category column." },
+                    metric: { type: "string", description: "Numeric column to aggregate per category." },
+                  },
+                  required: ["cat", "metric"],
+                },
+              },
+              required: widgetCommonRequired,
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                ...widgetBase,
+                type: { const: "statlist" },
+                fields: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    cat: { type: "string", description: "Category column." },
+                    metric: { type: "string", description: "Numeric column to aggregate per category." },
+                  },
+                  required: ["cat", "metric"],
+                },
+              },
+              required: widgetCommonRequired,
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                ...widgetBase,
+                type: { const: "table" },
+                fields: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    limit: { type: "integer", minimum: 1, maximum: 100 },
+                  },
+                },
+              },
+              required: ["type", "span", "title"],
+            },
+          ],
+        },
+      },
+      observations: {
+        type: "array",
+        maxItems: 3,
+        items: { type: "string", minLength: 1 },
+      },
+    },
+    required: ["title", "widgets"],
+  },
+};
+
+const SYSTEM_PROMPT_PLAN = "You are Mise, an editorial dashboard designer. Read the user message — it contains the data shape and any guidance — and deliver the layout via the deliver_recipe tool. Call deliver_recipe exactly once with a complete recipe; do not write prose.";
 
 const SYSTEM_PROMPT_CHEF = "You are The Chef, an editorial dashboard editor. Apply the user's request to the current recipe and return the updated recipe as JSON, following the schema in the user message.";
 
@@ -145,6 +285,7 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
 
   const isPlan = kind === "plan";
   const system = isPlan ? SYSTEM_PROMPT_PLAN : SYSTEM_PROMPT_CHEF;
+  const outputSchema = isPlan ? RECIPE_SCHEMA : undefined;
 
   // VERBOSE
   logEvent({
@@ -153,12 +294,13 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
     model,
     baseURL,
     promptLen: prompt.length,
+    structured: Boolean(outputSchema),
   });
 
   // Tight upstream timeout. The SDK retries up to 3× on timeouts/network
-  // errors; with 15s per attempt we worst-case ~46s, comfortably inside the
-  // 90s Lambda budget so we get a clean 502 instead of a hard kill.
-  const client = getClient(baseURL, apiKey, 15);
+  // errors; with 25s per attempt we worst-case ~76s, inside the 90s Lambda
+  // budget so a hang surfaces as a clean 502 instead of a hard kill.
+  const client = getClient(baseURL, apiKey, 25);
   const upstreamT0 = Date.now();
   let response;
   try {
@@ -168,6 +310,7 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
       messages: [{ role: "user", content: prompt }],
       tools: [],
       maxTokens: 16384,
+      outputSchema,
     });
   } catch (e) {
     const err = e instanceof Error ? e.message : "unknown";
@@ -184,13 +327,21 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
     return json(502, { error: "upstream", detail: err });
   }
   const upstreamMs = Date.now() - upstreamT0;
-  const text = response.text;
+
+  // For plan calls, the SDK validated the structured output for us — return
+  // it as a JSON string so the existing client-side parser consumes it
+  // unchanged. If the model didn't call the synthetic tool (no `output`),
+  // fall through to whatever text it produced.
+  const text = isPlan && response.output !== undefined
+    ? JSON.stringify(response.output)
+    : response.text;
 
   // VERBOSE
   logEvent({
     event: "ok",
     kind,
     model,
+    structured: Boolean(outputSchema),
     upstreamMs,
     promptLen: prompt.length,
     responseLen: text.length,
@@ -199,7 +350,8 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
     cachedInputTokens: response.usage?.cachedInputTokens,
     status: 200,
     ms: Date.now() - t0,
-    rawText: text,
+    output: response.output,
+    rawText: response.text,
   });
   return json(200, { text });
 };
