@@ -107,11 +107,14 @@ const cookUrl = new aws.lambda.FunctionUrl("cook-url", {
 // Function URL UI). The principal "*" on InvokeFunction does not allow
 // unauthenticated AWS-API calls — those still require sigV4 signing — so
 // it's only consumed by Function URL invocations in practice.
+//
+// Note: AWS rejects the FunctionUrlAuthType condition for the
+// InvokeFunction action ("only supported for lambda:InvokeFunctionUrl"),
+// so we omit it here.
 new aws.lambda.Permission("cook-public-invoke-function", {
   action: "lambda:InvokeFunction",
   function: cookFn.name,
   principal: "*",
-  functionUrlAuthType: "NONE",
   statementId: "AllowPublicInvokeFunction",
 });
 
