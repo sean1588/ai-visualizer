@@ -2,12 +2,9 @@
 // Receives { prompt, kind } from the browser, forwards to an OpenAI-compatible
 // endpoint via @sean.holung/minicode-sdk, returns { text }.
 //
-// !! PRE-LAUNCH DIAGNOSTIC LOGGING !!
-// Currently logs full prompt content and upstream responses for debugging
-// while no real users are hitting the proxy. Before public launch, dial back
-// to structured-only logs (no body content) to honor the "nothing leaves your
-// browser except one stateless LLM call, never logged" privacy claim. Search
-// for `// VERBOSE` markers below.
+// Logs are intentionally metadata-only. User prompts and row samples are sent
+// to the configured model provider for inference, but we do not persist them
+// in Lambda logs.
 
 import {
   OpenAICompatibleModelClient,
@@ -218,7 +215,51 @@ const RECIPE_SCHEMA: OutputSchema = {
 
 const SYSTEM_PROMPT_PLAN = "You are Mise, an editorial dashboard designer. Read the user message — it contains the data shape and any guidance — and deliver the layout via the deliver_recipe tool. Call deliver_recipe exactly once with a complete recipe; do not write prose.";
 
-const SYSTEM_PROMPT_CHEF = "You are The Chef, an editorial dashboard editor. Apply the user's request to the current recipe and return the updated recipe as JSON, following the schema in the user message.";
+const recipeSchemaObject = RECIPE_SCHEMA.schema as any;
+const recipeWidgetItems = recipeSchemaObject.properties.widgets.items.oneOf as unknown[];
+const OBSERVATIONS_WIDGET_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    type: { const: "observations" },
+    span: { const: 12 },
+    title: { type: "string" },
+    observations: {
+      type: "array",
+      minItems: 1,
+      maxItems: 3,
+      items: { type: "string", minLength: 1 },
+    },
+  },
+  required: ["type", "span", "title", "observations"],
+};
+
+const CHEF_RECIPE_SCHEMA: OutputSchema = {
+  name: "deliver_chef_recipe",
+  description: "Deliver the edited dashboard recipe as a single structured payload. Call this tool exactly once.",
+  schema: {
+    ...recipeSchemaObject,
+    properties: {
+      ...recipeSchemaObject.properties,
+      reply: { type: "string", minLength: 1 },
+      changes: {
+        type: "array",
+        maxItems: 6,
+        items: { type: "string", minLength: 1 },
+      },
+      widgets: {
+        ...recipeSchemaObject.properties.widgets,
+        maxItems: 10,
+        items: {
+          oneOf: [...recipeWidgetItems, OBSERVATIONS_WIDGET_SCHEMA],
+        },
+      },
+    },
+    required: ["title", "reply", "changes", "widgets"],
+  },
+};
+
+const SYSTEM_PROMPT_CHEF = "You are The Chef, an editorial dashboard editor. Read the user message and deliver the edited recipe via the deliver_chef_recipe tool. Call deliver_chef_recipe exactly once with a complete recipe; do not write prose.";
 
 // Module-scope client; reused across warm invocations.
 let modelClient: OpenAICompatibleModelClient | undefined;
@@ -263,12 +304,11 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
     payload = JSON.parse(raw || "{}");
   } catch (e) {
     const err = e instanceof Error ? e.message : "unknown";
-    logEvent({ event: "rejected", reason: "invalid_json", status: 400, ms: Date.now() - t0, err, rawBody: raw.slice(0, 4000) });
+    logEvent({ event: "rejected", reason: "invalid_json", status: 400, ms: Date.now() - t0, err, bodyLen: raw.length });
     return json(400, { error: "invalid_json" });
   }
   const kind = typeof payload.kind === "string" ? payload.kind : "unknown";
-  // VERBOSE
-  logEvent({ event: "request_received", method, ip, kind, body: payload });
+  logEvent({ event: "request_received", method, ip, kind });
 
   const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
   if (!prompt || prompt.length > MAX_PROMPT_CHARS) {
@@ -286,9 +326,8 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
 
   const isPlan = kind === "plan";
   const system = isPlan ? SYSTEM_PROMPT_PLAN : SYSTEM_PROMPT_CHEF;
-  const outputSchema = isPlan ? RECIPE_SCHEMA : undefined;
+  const outputSchema = isPlan ? RECIPE_SCHEMA : (kind === "chef" ? CHEF_RECIPE_SCHEMA : undefined);
 
-  // VERBOSE
   logEvent({
     event: "upstream_start",
     kind,
@@ -322,14 +361,13 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
       // permissive pass (drops bad widgets, keeps good ones); if that
       // also fails, the client has its deterministic fallback recipe.
       // Log the validation errors so we can tighten the prompt.
-      // VERBOSE
       logEvent({
         event: "structured_output_invalid",
         kind,
         upstreamMs,
         ms: Date.now() - t0,
         validationErrors: e.errors,
-        raw: e.raw,
+        rawType: typeof e.raw,
       });
       validationFallbackText = typeof e.raw === "string"
         ? e.raw
@@ -357,7 +395,7 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
   //   3. Model's raw text reply (for non-plan kinds, or when the model didn't
   //      use the synthetic tool at all)
   let text: string;
-  if (response && isPlan && response.output !== undefined) {
+  if (response && response.output !== undefined) {
     text = JSON.stringify(response.output);
   } else if (validationFallbackText !== undefined) {
     text = validationFallbackText;
@@ -367,7 +405,6 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
     text = "";
   }
 
-  // VERBOSE
   logEvent({
     event: "ok",
     kind,
@@ -383,8 +420,6 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
     cachedInputTokens: response?.usage?.cachedInputTokens,
     status: 200,
     ms: Date.now() - t0,
-    output: response?.output,
-    rawText: response?.text,
   });
   return json(200, { text });
 };
