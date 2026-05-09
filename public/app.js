@@ -1347,6 +1347,28 @@ function toCanonicalWidgets(widgets) {
   return (widgets || []).map(toCanonicalWidget).filter(Boolean);
 }
 
+function widgetIdentity(w) {
+  if (!w || !w.type) return '';
+  const title = String(w.title || w.label || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return `${w.type}:${title}`;
+}
+
+function repairChefWidgets(widgets, currentWidgets) {
+  const currentByIdentity = new Map(toCanonicalWidgets(currentWidgets).map(w => [widgetIdentity(w), w]));
+  return (widgets || []).map(w => {
+    if (!w || typeof w !== 'object') return w;
+    const canonical = toCanonicalWidget(w);
+    if (canonical) return canonical;
+    const match = currentByIdentity.get(widgetIdentity(w));
+    if (!match) return w;
+    return {
+      ...match,
+      ...w,
+      fields: w.fields || match.fields
+    };
+  });
+}
+
 function toCanonicalWidget(w) {
   if (!w || typeof w !== 'object') return null;
   const span = VALID_SPANS.has(Number(w.span)) ? Number(w.span) : (w.type === 'kpi' ? 3 : 6);
@@ -1423,8 +1445,9 @@ async function chefSubmit(text) {
       throw new Error('The chef returned no widgets. Try rephrasing.');
     }
 
-    const validated = chefValidateRecipe(parsed, state.schema);
-    const requestedCount = Array.isArray(parsed.widgets) ? parsed.widgets.length : 0;
+    const repairedWidgets = repairChefWidgets(parsed.widgets, state.recipe.widgets);
+    const validated = chefValidateRecipe({ ...parsed, widgets: repairedWidgets }, state.schema);
+    const requestedCount = Array.isArray(repairedWidgets) ? repairedWidgets.length : 0;
     if (requestedCount > 1 && validated.dropped > 0 && validated.widgets.length < Math.ceil(requestedCount * 0.75)) {
       throw new Error('The chef returned an incomplete recipe. Try that edit again.');
     }

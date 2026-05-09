@@ -316,7 +316,11 @@ const RECIPE_SCHEMA: OutputSchema = {
 const SYSTEM_PROMPT_PLAN = "You are Mise, an editorial dashboard designer. Read the user message — it contains the data shape and any guidance — and deliver the layout via the deliver_recipe tool. Call deliver_recipe exactly once with a complete recipe; do not write prose.";
 
 const recipeSchemaObject = RECIPE_SCHEMA.schema as any;
-const recipeWidgetItems = recipeSchemaObject.properties.widgets.items.oneOf as unknown[];
+const recipeWidgetItems = recipeSchemaObject.properties.widgets.items.oneOf as Record<string, unknown>[];
+const chefRecipeWidgetItems = recipeWidgetItems.map(item => ({
+  ...item,
+  additionalProperties: true,
+}));
 const OBSERVATIONS_WIDGET_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -351,7 +355,7 @@ const CHEF_RECIPE_SCHEMA: OutputSchema = {
         ...recipeSchemaObject.properties.widgets,
         maxItems: 10,
         items: {
-          oneOf: [...recipeWidgetItems, OBSERVATIONS_WIDGET_SCHEMA],
+          oneOf: [...chefRecipeWidgetItems, OBSERVATIONS_WIDGET_SCHEMA],
         },
       },
     },
