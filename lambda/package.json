@@ -6,7 +6,8 @@
   "main": "dist/cook.js",
   "scripts": {
     "build": "esbuild cook.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/cook.js --minify",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && npm test",
+    "test": "playwright install chromium && node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@sean.holung/minicode-sdk": "^0.0.1"
@@ -14,6 +15,7 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "esbuild": "^0.23.0",
+    "playwright": "^1.59.1",
     "typescript": "^5.5.0"
   }
 }
