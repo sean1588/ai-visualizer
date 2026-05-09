@@ -56,6 +56,7 @@ function showStage(name) {
 }
 
 function reset() {
+  resetChefSession();
   state.rows = null; state.schema = null; state.recipe = null; state.id = null; state.dataSource = null;
   document.getElementById('paste').value = '';
   document.getElementById('http-url').value = '';
@@ -822,6 +823,7 @@ function relativeTime(ts) {
 function restoreRecent(id) {
   const entry = loadRecents().find(r => r.id === id);
   if (!entry) return;
+  resetChefSession();
   state.rows = entry.rows;
   state.schema = entry.schema;
   state.recipe = entry.recipe;
@@ -929,6 +931,7 @@ async function runPipeline(rawText) {
 }
 
 async function runPipelineFromRows(rawText, dataSource) {
+  resetChefSession();
   document.getElementById('err').style.display = 'none';
   let rows;
   try { rows = parseInput(rawText); }
@@ -1175,6 +1178,17 @@ const chef = {
   thinking: false,
   pendingHighlight: null  // Set of widget-fingerprints to pulse on next render
 };
+
+function resetChefSession() {
+  chef.history = [];
+  chef.thinking = false;
+  chef.pendingHighlight = null;
+  document.getElementById('chef-panel')?.classList.remove('is-open');
+  document.getElementById('chef-input') && (document.getElementById('chef-input').value = '');
+  const send = document.getElementById('chef-send');
+  if (send) send.disabled = true;
+  chefRender();
+}
 
 // Stable fingerprint per widget (type + key fields). Used to diff old vs new
 // widget arrays so we can highlight only the ones that actually changed.
