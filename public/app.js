@@ -37,8 +37,10 @@ const state = {
   schema: null,
   recipe: null,
   id: null,
-  title: "Untitled dashboard"
+  title: "Untitled dashboard",
+  dataSource: null
 };
+let statusFlashTimer = null;
 
 // ─── stage switch ───────────────────────────────────────────────────
 function showStage(name) {
@@ -54,11 +56,13 @@ function showStage(name) {
 }
 
 function reset() {
-  state.rows = null; state.schema = null; state.recipe = null; state.id = null;
+  state.rows = null; state.schema = null; state.recipe = null; state.id = null; state.dataSource = null;
   document.getElementById('paste').value = '';
+  document.getElementById('http-url').value = '';
   document.getElementById('file-name').textContent = 'no file selected';
   document.getElementById('file-input').value = '';
   document.getElementById('err').style.display = 'none';
+  document.getElementById('refresh-btn').disabled = true;
   document.getElementById('export-btn').disabled = true;
   document.getElementById('export-recipe-btn').disabled = true;
   document.getElementById('crumb').textContent = 'New dashboard';
@@ -317,6 +321,7 @@ function parseAndValidateRecipe(raw, schema, rows) {
       validated.push({
         type: 'kpi', span,
         label: w.title || humanize(fields.metric),
+        metric: fields.metric,
         value: computed.value,
         delta: computed.delta,
         aggregate,
@@ -394,6 +399,7 @@ function deterministicRecipe(rows, schema) {
     widgets.push({
       type: 'kpi', span: 12 / Math.min(4, kpiCols.length),
       label: humanize(col.name),
+      metric: col.name,
       value: fmtCompact(last),
       delta,
       sparkCol: dateCol ? col.name : null
@@ -490,6 +496,10 @@ function renderSchema(schema) {
 function escapeHTML(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
 
 function renderDashboard() {
+  if (statusFlashTimer) {
+    clearTimeout(statusFlashTimer);
+    statusFlashTimer = null;
+  }
   document.getElementById('dash-title').textContent = state.recipe.title;
   document.getElementById('dash-meta').textContent =
     `${state.rows.length} rows · ${state.schema.length} cols · rendered ${new Date().toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}`;
@@ -509,8 +519,9 @@ function renderDashboard() {
   }).join('');
   document.getElementById('export-btn').disabled = false;
   document.getElementById('export-recipe-btn').disabled = false;
+  document.getElementById('refresh-btn').disabled = state.dataSource?.type !== 'http';
   document.getElementById('crumb').textContent = state.recipe.title;
-  document.getElementById('status-pill').innerHTML = '<span class="pill-dot active"></span>Live · ready to export';
+  document.getElementById('status-pill').innerHTML = `<span class="pill-dot active"></span>${state.dataSource?.type === 'http' ? 'HTTP · refreshable' : 'Live · ready to export'}`;
 }
 
 function renderWidget(w) {
@@ -786,11 +797,12 @@ function renderRecents() {
   const host = document.getElementById('recent-list');
   host.innerHTML = list.map(r => {
     const rowCount = Array.isArray(r.rows) ? r.rows.length : (r.rows || 0);
+    const source = r.dataSource?.type === 'http' ? ' · HTTP' : '';
     return `
     <div class="recent-card" data-id="${escapeHTML(r.id)}">
       <h4 class="recent-card-title">${escapeHTML(r.title || 'Untitled')}</h4>
       <div class="recent-card-meta">
-        <span>${rowCount}r · ${r.cols}c</span>
+        <span>${rowCount}r · ${r.cols}c${source}</span>
         <span>${relativeTime(r.savedAt)}</span>
       </div>
     </div>`;
@@ -815,6 +827,7 @@ function restoreRecent(id) {
   state.recipe = entry.recipe;
   state.title = entry.title;
   state.id = entry.id;
+  state.dataSource = entry.dataSource || null;
   renderDashboard();
   showStage('dash');
 }
@@ -825,6 +838,7 @@ function persistCurrent() {
   saveRecent({
     id, title: state.recipe.title,
     rows: state.rows, schema: state.schema, recipe: state.recipe,
+    dataSource: state.dataSource || null,
     savedAt: Date.now(),
     cols: state.schema.length
   });
@@ -844,6 +858,7 @@ function exportRecipe() {
     schema: state.schema,
     widgets: state.recipe.widgets,
     rowCount: state.rows.length,
+    dataSource: state.dataSource || null,
     generatedAt: new Date().toISOString(),
     generator: 'Mise v0.5'
   };
@@ -899,13 +914,21 @@ function loadScript(src) {
 }
 function flashStatus(msg, isErr) {
   const pill = document.getElementById('status-pill');
+  if (statusFlashTimer) clearTimeout(statusFlashTimer);
   const prev = pill.innerHTML;
   pill.innerHTML = `<span class="pill-dot ${isErr ? '' : 'active'}"></span>${msg}`;
-  setTimeout(() => { pill.innerHTML = prev; }, 2200);
+  statusFlashTimer = setTimeout(() => {
+    pill.innerHTML = prev;
+    statusFlashTimer = null;
+  }, 2200);
 }
 
 // ─── flow ───────────────────────────────────────────────────────────
 async function runPipeline(rawText) {
+  return runPipelineFromRows(rawText, null);
+}
+
+async function runPipelineFromRows(rawText, dataSource) {
   document.getElementById('err').style.display = 'none';
   let rows;
   try { rows = parseInput(rawText); }
@@ -915,6 +938,7 @@ async function runPipeline(rawText) {
     return;
   }
   state.rows = rows;
+  state.dataSource = dataSource;
   showStage('loading');
   document.getElementById('crumb').textContent = 'Reading…';
   document.getElementById('loading-file-text').textContent =
@@ -954,6 +978,89 @@ async function runPipeline(rawText) {
   });
 }
 
+async function fetchRemoteData(url) {
+  const r = await fetch('/api/fetch-data', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ url })
+  });
+  let payload = {};
+  try { payload = await r.json(); } catch {}
+  if (!r.ok) {
+    const detail = payload.detail ? ` (${String(payload.detail).slice(0, 180)})` : '';
+    throw new Error(`${payload.error || 'fetch_failed'}${detail}`);
+  }
+  return {
+    text: payload.text || '',
+    finalUrl: payload.finalUrl || url,
+    contentType: payload.contentType || ''
+  };
+}
+
+async function runHttpPipeline(url) {
+  const input = document.getElementById('http-url');
+  const err = document.getElementById('err');
+  const cleanUrl = String(url || input.value || '').trim();
+  if (!cleanUrl) {
+    err.textContent = 'Enter an HTTP or HTTPS URL to fetch.';
+    err.style.display = 'block';
+    return;
+  }
+  err.style.display = 'none';
+  try {
+    flashStatus('Fetching data…');
+    const fetched = await fetchRemoteData(cleanUrl);
+    document.getElementById('paste').value = fetched.text;
+    input.value = fetched.finalUrl;
+    await runPipelineFromRows(fetched.text, {
+      type: 'http',
+      url: fetched.finalUrl,
+      contentType: fetched.contentType,
+      fetchedAt: new Date().toISOString()
+    });
+  } catch (e) {
+    err.textContent = `Could not fetch URL: ${e.message || e}`;
+    err.style.display = 'block';
+    flashStatus('Fetch failed', true);
+  }
+}
+
+function rehydrateRecipeForCurrentRows(recipe, schema) {
+  const canonical = toCanonicalWidgets((recipe?.widgets || []).filter(w => w.type !== 'observations'));
+  const validated = chefValidateRecipe({ widgets: canonical }, schema);
+  const widgets = validated.widgets.length ? validated.widgets : deterministicRecipe(state.rows, schema).widgets;
+  return {
+    title: recipe?.title || state.title || 'Untitled dashboard',
+    widgets,
+    fallback: false
+  };
+}
+
+async function refreshCurrentDashboard() {
+  if (state.dataSource?.type !== 'http' || !state.recipe) return;
+  const source = state.dataSource;
+  try {
+    flashStatus('Refreshing data…');
+    const fetched = await fetchRemoteData(source.url);
+    const rows = parseInput(fetched.text);
+    state.rows = rows;
+    state.schema = inferSchema(rows);
+    state.recipe = rehydrateRecipeForCurrentRows(state.recipe, state.schema);
+    state.dataSource = {
+      ...source,
+      url: fetched.finalUrl || source.url,
+      contentType: fetched.contentType || source.contentType,
+      fetchedAt: new Date().toISOString()
+    };
+    renderDashboard();
+    persistCurrent();
+    flashStatus(`Refreshed ${rows.length} rows`);
+  } catch (e) {
+    console.warn('[refresh] failed', e);
+    flashStatus('Refresh failed', true);
+  }
+}
+
 function setStepActive(name) {
   const el = document.querySelector(`.loading-step[data-step="${name}"]`);
   el.classList.remove('step-pending'); el.classList.add('step-active');
@@ -973,6 +1080,12 @@ function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 document.getElementById('render-btn').addEventListener('click', () => {
   const v = document.getElementById('paste').value;
   runPipeline(v);
+});
+document.getElementById('fetch-url-btn').addEventListener('click', () => {
+  runHttpPipeline(document.getElementById('http-url').value);
+});
+document.getElementById('http-url').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runHttpPipeline(e.currentTarget.value);
 });
 
 document.querySelectorAll('.sample-chip').forEach(chip => {
@@ -1029,6 +1142,7 @@ document.getElementById('file-input').addEventListener('change', e => {
 // exports
 document.getElementById('export-recipe-btn').addEventListener('click', exportRecipe);
 document.getElementById('export-btn').addEventListener('click', exportPNG);
+document.getElementById('refresh-btn').addEventListener('click', refreshCurrentDashboard);
 
 // recents
 document.getElementById('recent-clear').addEventListener('click', e => {
@@ -1226,7 +1340,7 @@ function toCanonicalWidget(w) {
     return { type: 'observations', span: 12, title: w.title || 'What stood out', observations: w.observations || [] };
   }
   if (w.type === 'kpi') {
-    const metric = w.fields?.metric || inferMetricFromLabel(w.label || w.title);
+    const metric = w.fields?.metric || w.metric || inferMetricFromLabel(w.label || w.title);
     if (!metric) return null;
     const aggregate = normalizeKpiAggregate(w.fields?.aggregate || w.aggregate, w.title || w.label);
     return {
@@ -1368,6 +1482,7 @@ function chefValidateRecipe(parsed, schema) {
         span,
         label: w.title || canonical?.title || humanize(fields.metric),
         title: w.title || canonical?.title,
+        metric: fields.metric,
         value: kpi.value,
         delta: kpi.delta,
         aggregate,
