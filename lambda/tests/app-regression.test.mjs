@@ -259,6 +259,53 @@ test("chartable table-only model output falls back to a useful dashboard", async
   }, { allowConsole: /AI response did not validate, falling back/ });
 });
 
+test("HTTP source dashboards save a refreshable URL and refresh without re-planning", async () => {
+  await withPage(async page => {
+    let cookCalls = 0;
+    let fetchCalls = 0;
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, AGGREGATE_PLAN, () => { cookCalls++; });
+    await page.route("**/api/fetch-data", async route => {
+      fetchCalls++;
+      const rows = fetchCalls === 1
+        ? SEGMENT_REVENUE
+        : [...SEGMENT_REVENUE, { segment: "enterprise", revenue: 30000, channel: "partner" }];
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          text: JSON.stringify(rows),
+          contentType: "application/json",
+          finalUrl: "https://example.test/revenue.json",
+        }),
+      });
+    });
+
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#http-url").fill("https://example.test/revenue.json");
+    await page.locator("#fetch-url-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    let text = await page.locator("body").innerText();
+    assert.match(text, /HTTP · refreshable/i);
+    assert.match(text, /120k/);
+    assert.equal(cookCalls, 1);
+
+    await page.locator("#refresh-btn").click();
+    await page.waitForFunction(() => document.body.innerText.includes("150k"));
+
+    text = await page.locator("body").innerText();
+    assert.match(text, /150k/);
+    assert.match(text, /bar · 3 groups/i);
+    assert.equal(fetchCalls, 2);
+    assert.equal(cookCalls, 1);
+
+    await page.reload({ waitUntil: "networkidle" });
+    await page.getByText("Segment Revenue").first().click();
+    await page.waitForSelector("#chef-fab.is-visible");
+    assert.equal(await page.locator("#refresh-btn").isEnabled(), true);
+  });
+});
+
 async function withPage(fn, options = {}) {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ acceptDownloads: true, viewport: { width: 1440, height: 1100 } });
@@ -278,8 +325,9 @@ async function withPage(fn, options = {}) {
   }
 }
 
-async function mockInference(page, chefRecipe = CHEF_WITHOUT_OBSERVATIONS, planRecipe = PLAN) {
+async function mockInference(page, chefRecipe = CHEF_WITHOUT_OBSERVATIONS, planRecipe = PLAN, onRequest = null) {
   await page.route("**/api/cook", async route => {
+    onRequest?.(route.request());
     const body = route.request().postDataJSON();
     const payload = body.kind === "chef" ? chefRecipe : planRecipe;
     await route.fulfill({

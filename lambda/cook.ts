@@ -16,6 +16,7 @@ type CookRequest = {
   prompt?: unknown;
   kind?: unknown;
   temperature?: unknown;
+  url?: unknown;
 };
 
 type LambdaEvent = {
@@ -32,6 +33,8 @@ type LambdaResponse = {
 };
 
 const MAX_PROMPT_CHARS = 32_000;
+const MAX_FETCH_BYTES = 2_000_000;
+const FETCH_TIMEOUT_MS = 15_000;
 
 function logEvent(fields: Record<string, unknown>): void {
   console.log(JSON.stringify({ component: "cook", ...fields }));
@@ -46,6 +49,85 @@ const json = (statusCode: number, body: unknown, extra: Record<string, string> =
   },
   body: JSON.stringify(body),
 });
+
+function requestPath(event: LambdaEvent): string {
+  const e = event as LambdaEvent & { rawPath?: string; path?: string };
+  return e.rawPath || e.path || "";
+}
+
+function isBlockedHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  if (h === "localhost" || h.endsWith(".localhost")) return true;
+  if (h === "0.0.0.0" || h === "::1") return true;
+  if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h)) return true;
+  const private172 = h.match(/^172\.(\d+)\./);
+  if (private172) {
+    const n = Number(private172[1]);
+    if (n >= 16 && n <= 31) return true;
+  }
+  return false;
+}
+
+async function readLimitedResponse(res: Response): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return await res.text();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > MAX_FETCH_BYTES) {
+      await reader.cancel();
+      throw new Error("response_too_large");
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks.map(c => Buffer.from(c))).toString("utf-8");
+}
+
+async function handleFetchData(payload: CookRequest, t0: number): Promise<LambdaResponse> {
+  const rawUrl = typeof payload.url === "string" ? payload.url.trim() : "";
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    logEvent({ event: "fetch_rejected", reason: "invalid_url", status: 400, ms: Date.now() - t0 });
+    return json(400, { error: "invalid_url" });
+  }
+  if (!["http:", "https:"].includes(url.protocol) || isBlockedHost(url.hostname)) {
+    logEvent({ event: "fetch_rejected", reason: "unsupported_url", status: 400, host: url.hostname, ms: Date.now() - t0 });
+    return json(400, { error: "unsupported_url" });
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    logEvent({ event: "fetch_start", host: url.hostname });
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { accept: "application/json,text/csv,text/plain;q=0.9,*/*;q=0.1" },
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    const contentType = res.headers.get("content-type") || "";
+    const text = await readLimitedResponse(res);
+    if (!res.ok) {
+      logEvent({ event: "fetch_error", reason: "upstream_status", upstreamStatus: res.status, status: 502, ms: Date.now() - t0 });
+      return json(502, { error: "fetch_failed", status: res.status, detail: text.slice(0, 500) });
+    }
+    logEvent({ event: "fetch_ok", status: 200, bytes: Buffer.byteLength(text), contentType, ms: Date.now() - t0 });
+    return json(200, { text, contentType, finalUrl: res.url });
+  } catch (e) {
+    const err = e instanceof Error ? e.message : "unknown";
+    const reason = err === "response_too_large" ? "response_too_large" : "fetch_failed";
+    logEvent({ event: "fetch_error", reason, err, status: reason === "response_too_large" ? 413 : 502, ms: Date.now() - t0 });
+    return json(reason === "response_too_large" ? 413 : 502, { error: reason });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 // Per-instance LRU rate limit. Crude (resets on cold start, doesn't share
 // across concurrent Lambdas) but provides basic abuse control without extra
@@ -295,6 +377,7 @@ function getClient(baseUrl: string, apiKey: string, timeoutSeconds: number): Ope
 export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
   const t0 = Date.now();
   const method = event.requestContext?.http?.method || "POST";
+  const path = requestPath(event);
 
   if (method === "OPTIONS") {
     logEvent({ event: "preflight", method, ms: Date.now() - t0 });
@@ -325,6 +408,11 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
     logEvent({ event: "rejected", reason: "invalid_json", status: 400, ms: Date.now() - t0, err, bodyLen: raw.length });
     return json(400, { error: "invalid_json" });
   }
+
+  if (path.endsWith("/api/fetch-data")) {
+    return handleFetchData(payload, t0);
+  }
+
   const kind = typeof payload.kind === "string" ? payload.kind : "unknown";
   logEvent({ event: "request_received", method, ip, kind });
 

@@ -87,6 +87,10 @@
   .recent-card:hover { border-color: var(--rule); transform: translateY(-1px); }
   .recent-card-title { font-family: var(--font-display); font-style: italic; font-size: 16px; line-height: 1.2; margin: 0 0 6px; color: var(--fg); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .recent-card-meta { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; color: var(--fg-mute); display: flex; justify-content: space-between; }
+  .http-source { width: 100%; max-width: 540px; margin: 0 auto; display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+  .http-source-input { min-width: 0; padding: 10px 12px; border: 1px solid var(--rule-soft); background: var(--bg); font-family: var(--font-mono); font-size: 12px; color: var(--fg); outline: none; }
+  .http-source-input:focus { border-color: var(--rule); }
+  .http-source-hint { grid-column: 1 / -1; font-family: var(--font-mono); font-size: 10px; color: var(--fg-mute); letter-spacing: 0.06em; text-align: left; }
   .drop-paste { width: 100%; max-width: 540px; margin: 0 auto; padding: 12px 14px; border: 1px solid var(--rule-soft); background: var(--bg); font-family: var(--font-mono); font-size: 12.5px; color: var(--fg); text-align: left; min-height: 90px; resize: vertical; outline: none; }
   .drop-paste:focus { border-color: var(--rule); }
   .drop-paste::placeholder { color: var(--fg-mute); }
@@ -309,6 +313,7 @@
     .lede { font-size: 15px; }
     .drop { padding: 28px 18px; }
     .drop h3 { font-size: 19px; }
+    .http-source { grid-template-columns: 1fr; }
     .drop-paste { min-height: 90px; font-size: 13px; }
 
     /* notes — collapse by default, tap to expand */
@@ -381,6 +386,7 @@
   </div>
   <div class="top-right">
     <span id="status-pill" class="pill"><span class="pill-dot"></span>Local · not exported</span>
+    <button id="refresh-btn" class="btn btn-ghost" disabled title="Fetch fresh rows from the saved HTTP source">Refresh data</button>
     <button id="export-recipe-btn" class="btn btn-ghost" disabled title="Download the layout recipe as JSON">Recipe ↓</button>
     <button id="export-btn" class="btn btn-ghost" disabled>Export PNG ↓</button>
   </div>
@@ -404,6 +410,12 @@
           <button id="browse-btn" type="button" class="btn btn-ghost">Choose file…</button>
           <input id="file-input" type="file" accept=".csv,.json,.txt,application/json,text/csv,text/plain" style="display:none;" />
           <span class="drop-cta-meta" id="file-name">no file selected</span>
+        </div>
+        <div class="or"><span>or fetch</span></div>
+        <div class="http-source">
+          <input id="http-url" class="http-source-input" type="url" inputmode="url" placeholder="https://api.example.com/data.json" />
+          <button id="fetch-url-btn" type="button" class="btn btn-ghost">Fetch URL</button>
+          <div class="http-source-hint">GET endpoints returning JSON arrays/objects or CSV. Saved HTTP dashboards can refresh without asking the AI again.</div>
         </div>
         <div class="or"><span>or paste</span></div>
         <textarea id="paste" class="drop-paste" placeholder='Paste JSON or CSV — e.g. [{"month":"Jan","revenue":42000}, ...]'></textarea>
