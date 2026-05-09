@@ -138,7 +138,7 @@ function inferSchema(rows) {
     else if (values.length && values.every(v => /^\d{4}-\d{2}(-\d{2})?/.test(String(v)))) type = 'date';
     else if (values.length && values.every(v => /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(String(v)))) type = 'date';
     const unique = new Set(values.map(String)).size;
-    if (type === 'string' && unique <= Math.max(8, Math.ceil(values.length * 0.3))) type = 'category';
+    if (type === 'string' && unique <= Math.min(20, Math.max(8, Math.ceil(values.length * 0.6)))) type = 'category';
     let stat = '';
     if (type === 'number') {
       const min = Math.min(...values), max = Math.max(...values);
@@ -157,8 +157,17 @@ function inferSchema(rows) {
 // is unreachable, returns garbage, or times out. The whole product
 // hinges on the AI making smart layout choices from the schema.
 
-const VALID_WIDGET_TYPES = new Set(['kpi','line','bar','donut','statlist','table']);
+const VALID_WIDGET_TYPES = new Set(['kpi','line','bar','donut','statlist','countbar','table']);
 const VALID_SPANS = new Set([3, 4, 6, 8, 12]);
+const COORDINATE_COLUMNS = new Set(['lat', 'latitude', 'lon', 'lng', 'long', 'longitude']);
+
+function isCoordinateColumn(name) {
+  return COORDINATE_COLUMNS.has(String(name || '').trim().toLowerCase());
+}
+
+function isMeaningfulMetricColumn(col) {
+  return col?.type === 'number' && !isCoordinateColumn(col.name);
+}
 
 // LLM proxy. The API key lives server-side in the Lambda.
 async function complete(prompt, kind) {
@@ -215,11 +224,12 @@ Column-typing rules (HARD):
 - "kpi.metric", "line.y", "bar.y", "donut.metric", "statlist.metric" — must reference a NUMERIC column with values that meaningfully aggregate (sum, average, last value). Coordinates like lat/lon are NOT meaningful KPIs; pick something that summarizes the dataset.
 - "line.x" — date column. If the schema has no date column, do not emit a line widget.
 - "bar.x", "donut.cat", "statlist.cat" — category column.
+- "countbar.cat" — category column; use this when the dataset has useful categories but no meaningful numeric metric.
 - All "fields" values must reference column names that appear in <SCHEMA> verbatim.
 
 Layout rules:
 - 4-8 widgets total. Span values must sum to multiples of 12 per visual row (e.g. 3+3+3+3, 6+6, 8+4, 12).
-- Prefer KPIs (span 3 each, 4 across) when there are real numeric metrics. For categorical-only datasets (no meaningful numeric columns), skip KPIs entirely and lead with donut, bar, or statlist breakdowns plus a table.
+- Prefer KPIs (span 3 each, 4 across) when there are real numeric metrics. For categorical-only or entity-list datasets (no meaningful numeric columns), skip KPIs entirely and lead with countbar breakdowns plus a table.
 - A line chart of the primary metric over time should exist when there's a date column.
 - Observations: up to 3 short, fact-citing sentences. They are the right place to highlight categorical insights ("30 airports across 18 countries") when no KPI fits.`;
 }
@@ -260,6 +270,10 @@ function parseAndValidateRecipe(raw, schema, rows) {
   if (!obj || typeof obj !== 'object' || !Array.isArray(obj.widgets)) return null;
 
   const colNames = new Set(schema.map(c => c.name));
+  const typeByCol = new Map(schema.map(c => [c.name, c.type]));
+  const isMetric = name => colNames.has(name) && typeByCol.get(name) === 'number' && !isCoordinateColumn(name);
+  const isDate = name => colNames.has(name) && typeByCol.get(name) === 'date';
+  const isGroup = name => colNames.has(name) && typeByCol.get(name) !== 'number';
   const validated = [];
   for (const w of obj.widgets) {
     if (!w || typeof w !== 'object') continue;
@@ -268,10 +282,11 @@ function parseAndValidateRecipe(raw, schema, rows) {
     if (!VALID_SPANS.has(span)) span = w.type === 'kpi' ? 3 : (w.type === 'table' ? 12 : 6);
     const fields = w.fields || {};
     // Validate field references
-    if (w.type === 'kpi' && !colNames.has(fields.metric)) continue;
-    if (w.type === 'line' && (!colNames.has(fields.x) || !colNames.has(fields.y))) continue;
-    if (w.type === 'bar' && (!colNames.has(fields.x) || !colNames.has(fields.y))) continue;
-    if ((w.type === 'donut' || w.type === 'statlist') && (!colNames.has(fields.cat) || !colNames.has(fields.metric))) continue;
+    if (w.type === 'kpi' && !isMetric(fields.metric)) continue;
+    if (w.type === 'line' && (!isDate(fields.x) || !isMetric(fields.y))) continue;
+    if (w.type === 'bar' && (!colNames.has(fields.x) || !isMetric(fields.y))) continue;
+    if ((w.type === 'donut' || w.type === 'statlist') && (!isGroup(fields.cat) || !isMetric(fields.metric))) continue;
+    if (w.type === 'countbar' && !isGroup(fields.cat)) continue;
     // KPI value/delta — compute from data
     if (w.type === 'kpi') {
       const vals = rows.map(r => r[fields.metric]).filter(v => typeof v === 'number');
@@ -292,6 +307,10 @@ function parseAndValidateRecipe(raw, schema, rows) {
     }
     if (w.type === 'donut' || w.type === 'statlist') {
       validated.push({ type: w.type, span, title: w.title || `${humanize(fields.metric)} by ${humanize(fields.cat)}`, cat: fields.cat, metric: fields.metric });
+      continue;
+    }
+    if (w.type === 'countbar') {
+      validated.push({ type: 'countbar', span, title: w.title || `Records by ${humanize(fields.cat)}`, cat: fields.cat });
       continue;
     }
     if (w.type === 'table') {
@@ -324,9 +343,24 @@ function parseAndValidateRecipe(raw, schema, rows) {
 // Deterministic safety net — only used if the model fails.
 function deterministicRecipe(rows, schema) {
   const dateCol = schema.find(c => c.type === 'date');
-  const numCols = schema.filter(c => c.type === 'number');
+  const numCols = schema.filter(isMeaningfulMetricColumn);
   const catCols = schema.filter(c => c.type === 'category');
+  const textCols = schema.filter(c => c.type === 'string');
   const widgets = [];
+
+  if (!numCols.length) {
+    const breakdown = catCols[0] || schema.find(c => c.unique > 1 && c.unique <= Math.max(20, Math.ceil(rows.length * 0.75)));
+    const entity = textCols.find(c => c.unique === rows.length) || schema[0];
+    const obs = [
+      `${rows.length} records across ${schema.length} columns.`,
+      breakdown ? `${humanize(breakdown.name)} has ${breakdown.unique} distinct value${breakdown.unique === 1 ? '' : 's'}.` : '',
+      entity ? `${humanize(entity.name)} appears to identify each record.` : ''
+    ].filter(Boolean);
+    if (obs.length) widgets.push({ type: 'observations', span: 12, observations: obs.slice(0, 3) });
+    if (breakdown) widgets.push({ type: 'countbar', span: 6, title: `Records by ${humanize(breakdown.name)}`, cat: breakdown.name });
+    widgets.push({ type: 'table', span: 12, title: 'Rows', limit: 10 });
+    return { title: 'Entity Overview', widgets };
+  }
 
   const kpiCols = numCols.slice(0, 4);
   kpiCols.forEach(col => {
@@ -378,6 +412,16 @@ function aggregateBy(rows, catKey, metricKey) {
   }
   return [...map.entries()].map(([k, v]) => ({ key: k, value: v }))
     .sort((a, b) => b.value - a.value);
+}
+
+function countBy(rows, catKey) {
+  const map = new Map();
+  for (const r of rows) {
+    const k = String(r[catKey] ?? '—');
+    map.set(k, (map.get(k) ?? 0) + 1);
+  }
+  return [...map.entries()].map(([k, v]) => ({ key: k, value: v }))
+    .sort((a, b) => b.value - a.value || a.key.localeCompare(b.key));
 }
 
 // ─── helpers ────────────────────────────────────────────────────────
@@ -443,6 +487,7 @@ function renderWidget(w) {
   if (w.type === 'table') return widgetTable(w);
   if (w.type === 'donut') return widgetDonut(w);
   if (w.type === 'statlist') return widgetStatList(w);
+  if (w.type === 'countbar') return widgetCountBar(w);
   if (w.type === 'hero') return widgetHero(w);
   if (w.type === 'observations') return widgetObservations(w);
   return '';
@@ -545,6 +590,37 @@ function widgetStatList(w) {
   return `<div class="w w-statlist" style="grid-column:span ${w.span};">
     <div class="w-hd"><h3>${escapeHTML(w.title)}</h3><span class="meta">${data.length} groups</span></div>
     <ul class="sl">${items}</ul>
+  </div>`;
+}
+
+function widgetCountBar(w) {
+  const data = countBy(state.rows, w.cat).slice(0, 12);
+  if (!data.length) return '';
+  const W = 400, H = 200, pl = 44, pr = 12, pt = 18, pb = 34;
+  const yMax = Math.max(...data.map(d => d.value));
+  const bw = (W - pl - pr) / data.length;
+  const yScale = y => H - pb - (y / (yMax || 1)) * (H - pt - pb);
+  const yTicks = 3;
+  const yTickLines = Array.from({length: yTicks+1}, (_,i) => {
+    const v = yMax * (i / yTicks);
+    const y = yScale(v);
+    return `<line class="grid-line" x1="${pl}" x2="${W-pr}" y1="${y}" y2="${y}"/><text class="axis-tick" x="${pl-6}" y="${y+3}" text-anchor="end">${fmtCompact(v)}</text>`;
+  }).join('');
+  const bars = data.map((d, i) => {
+    const x = pl + i * bw + bw * 0.15;
+    const y = yScale(d.value);
+    const h = (H - pb) - y;
+    return `<rect x="${x}" y="${y}" width="${bw * 0.7}" height="${h}" fill="var(--accent-2)" opacity="0.85"/>`;
+  }).join('');
+  const xLabels = data.map((d, i) => {
+    const x = pl + i*bw + bw/2;
+    return `<text class="axis-tick" x="${x}" y="${H-12}" text-anchor="middle">${escapeHTML(String(d.key).slice(0,10))}</text>`;
+  }).join('');
+  return `<div class="w w-chart" style="grid-column:span ${w.span};">
+    <div class="w-hd"><h3>${escapeHTML(w.title)}</h3><span class="meta">count · ${data.length}</span></div>
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      ${yTickLines}${bars}${xLabels}
+    </svg>
   </div>`;
 }
 
@@ -958,6 +1034,7 @@ function widgetFingerprint(w) {
   if (w.type === 'bar')      return `bar:${w.x}:${w.y}`;
   if (w.type === 'donut')    return `donut:${w.cat}:${w.metric}`;
   if (w.type === 'statlist') return `statlist:${w.cat}:${w.metric}`;
+  if (w.type === 'countbar') return `countbar:${w.cat}`;
   if (w.type === 'table')    return `table:${w.limit || 10}`;
   if (w.type === 'observations') return `observations:${(w.observations || []).join('|')}`;
   return w.type;
@@ -1088,6 +1165,7 @@ Widget shapes — use these exactly:
 - bar:      { "type":"bar", "span":6, "title":"...", "fields":{ "x":"<date or category col>", "y":"<numeric col>" } }
 - donut:    { "type":"donut", "span":6, "title":"...", "fields":{ "cat":"<category col>", "metric":"<numeric col>" } }
 - statlist: { "type":"statlist", "span":6, "title":"...", "fields":{ "cat":"<category col>", "metric":"<numeric col>" } }
+- countbar: { "type":"countbar", "span":6, "title":"...", "fields":{ "cat":"<category col>" } }
 - table:    { "type":"table", "span":12, "title":"...", "fields":{ "limit": 10 } }
 - observations: { "type":"observations", "span":12, "title":"What we noticed", "observations":["...","..."] }
 
@@ -1131,6 +1209,11 @@ function toCanonicalWidget(w) {
     const metric = w.fields?.metric || w.metric;
     if (!cat || !metric) return null;
     return { type: w.type, span, title: w.title || `${humanize(metric)} by ${humanize(cat)}`, fields: { cat, metric } };
+  }
+  if (w.type === 'countbar') {
+    const cat = w.fields?.cat || w.cat;
+    if (!cat) return null;
+    return { type: 'countbar', span, title: w.title || `Records by ${humanize(cat)}`, fields: { cat } };
   }
   if (w.type === 'table') {
     return { type: 'table', span: 12, title: w.title || 'Raw rows', fields: { limit: Number(w.limit || w.fields?.limit) || 10 } };
@@ -1227,7 +1310,7 @@ function chefValidateRecipe(parsed, schema) {
   const isDateCol = name => hasCol(name) && typeByCol.get(name) === 'date';
   const isGroupCol = name => hasCol(name) && typeByCol.get(name) !== 'number';
   const validSpans = new Set([3, 4, 6, 8, 12]);
-  const validTypes = new Set(['kpi','line','bar','donut','statlist','table','observations']);
+  const validTypes = new Set(['kpi','line','bar','donut','statlist','countbar','table','observations']);
   const widgets = [];
   let dropped = 0;
   for (const w of (parsed.widgets || [])) {
@@ -1257,6 +1340,9 @@ function chefValidateRecipe(parsed, schema) {
     } else if (w.type === 'donut' || w.type === 'statlist') {
       if (!isGroupCol(fields.cat) || !isNumberCol(fields.metric)) { dropped++; continue; }
       widgets.push({ type: w.type, span, title: w.title || humanize(fields.metric), cat: fields.cat, metric: fields.metric });
+    } else if (w.type === 'countbar') {
+      if (!isGroupCol(fields.cat)) { dropped++; continue; }
+      widgets.push({ type: 'countbar', span, title: w.title || `Records by ${humanize(fields.cat)}`, cat: fields.cat });
     } else if (w.type === 'table') {
       widgets.push({ type:'table', span: 12, title: w.title || 'Raw rows', limit: Number(fields.limit) || 10 });
     } else if (w.type === 'observations') {
