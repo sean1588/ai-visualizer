@@ -44,6 +44,22 @@ const BROKEN_PARTIAL_CHEF = {
   ],
 };
 
+const RENDERED_SHAPE_CHEF = {
+  title: PLAN.title,
+  reply: "Kept the same plate; the shape is now normalized.",
+  changes: ["normalized rendered widgets"],
+  widgets: [
+    { type: "kpi", span: 3, title: "MRR", label: "MRR", value: "102.4k", delta: 8.4, metric: "mrr" },
+    { type: "kpi", span: 3, title: "New Customers", label: "New Customers", value: "184", delta: 9.5, metric: "new_customers" },
+    { type: "kpi", span: 3, title: "Churn", label: "Churn", value: "22", delta: 22.2, metric: "churn" },
+    { type: "kpi", span: 3, title: "NPS", label: "NPS", value: "61", delta: 5.2, metric: "nps" },
+    { type: "line", span: 8, title: "MRR Trend", x: "month", y: "mrr" },
+    { type: "bar", span: 4, title: "Customer Acquisition", x: "month", y: "new_customers" },
+    { type: "bar", span: 6, title: "Monthly Churn", x: "month", y: "churn" },
+    { type: "line", span: 6, title: "NPS Trend", x: "month", y: "nps" },
+  ],
+};
+
 const AIRPORTS = [
   { code: "ATL", name: "Hartsfield-Jackson Atlanta International", city: "Atlanta", country: "US", lat: 33.6407, lon: -84.4277 },
   { code: "PEK", name: "Beijing Capital International", city: "Beijing", country: "CN", lat: 40.0801, lon: 116.5846 },
@@ -257,6 +273,26 @@ test("mobile dashboard stacks without horizontal overflow and uses compact Chef 
     assert.equal(metrics.fabLabelDisplay, "none");
     assert.equal(metrics.fabWidth, 46);
     assert.equal(metrics.fabHeight, 46);
+  });
+});
+
+test("Chef accepts recoverable rendered-widget replies instead of surfacing invalid recipe", async () => {
+  await withPage(async page => {
+    await mockInference(page, RENDERED_SHAPE_CHEF);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.getByText("SAAS METRICS").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    await page.locator("#chef-fab").click();
+    await page.locator("#chef-input").fill("Make the layout a little cleaner");
+    await page.locator("#chef-send").click();
+    await page.waitForFunction(() => document.body.innerText.includes("Kept the same plate"));
+
+    const text = await page.locator("body").innerText();
+    assert.doesNotMatch(text, /No valid widgets|incomplete recipe|Couldn.t parse/i);
+    assert.match(text, /102\.4k/);
+    assert.match(text, /MRR Trend/);
+    assert.match(text, /Customer Acquisition/);
   });
 });
 
