@@ -252,7 +252,8 @@ Layout rules:
 - 4-8 widgets total. Span values must sum to multiples of 12 per visual row (e.g. 3+3+3+3, 6+6, 8+4, 12).
 - Prefer KPIs (span 3 each, 4 across) when there are real numeric metrics. For categorical-only or entity-list datasets (no meaningful numeric columns), skip KPIs entirely and lead with countbar breakdowns plus a table.
 - A line chart of the primary metric over time should exist when there's a date column.
-- Observations: up to 3 short, fact-citing sentences. They are the right place to highlight categorical insights ("30 airports across 18 countries") when no KPI fits.`;
+- Observations: up to 3 short, fact-citing sentences. They are the right place to highlight categorical insights ("30 airports across 18 countries") when no KPI fits.
+- Observation copy should sound polished and final. Do not include uncertainty, rhetorical questions, or self-corrections like "actually" or "maybe".`;
 }
 
 async function planRecipe(rows, schema, notes) {
