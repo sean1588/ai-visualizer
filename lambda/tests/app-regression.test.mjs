@@ -44,6 +44,21 @@ const BROKEN_PARTIAL_CHEF = {
   ],
 };
 
+const AIRPORTS = [
+  { code: "ATL", name: "Hartsfield-Jackson Atlanta International", city: "Atlanta", country: "US", lat: 33.6407, lon: -84.4277 },
+  { code: "PEK", name: "Beijing Capital International", city: "Beijing", country: "CN", lat: 40.0801, lon: 116.5846 },
+  { code: "DXB", name: "Dubai International", city: "Dubai", country: "AE", lat: 25.2528, lon: 55.3644 },
+  { code: "LAX", name: "Los Angeles International", city: "Los Angeles", country: "US", lat: 33.9425, lon: -118.4081 },
+  { code: "HND", name: "Tokyo Haneda", city: "Tokyo", country: "JP", lat: 35.5494, lon: 139.7798 },
+  { code: "ORD", name: "O'Hare International", city: "Chicago", country: "US", lat: 41.9742, lon: -87.9073 },
+  { code: "LHR", name: "London Heathrow", city: "London", country: "GB", lat: 51.47, lon: -0.4543 },
+  { code: "PVG", name: "Shanghai Pudong International", city: "Shanghai", country: "CN", lat: 31.1443, lon: 121.8083 },
+  { code: "CDG", name: "Charles de Gaulle", city: "Paris", country: "FR", lat: 49.0097, lon: 2.5479 },
+  { code: "AMS", name: "Amsterdam Schiphol", city: "Amsterdam", country: "NL", lat: 52.3105, lon: 4.7683 },
+  { code: "DFW", name: "Dallas/Fort Worth International", city: "Dallas", country: "US", lat: 32.8998, lon: -97.0403 },
+  { code: "FRA", name: "Frankfurt Airport", city: "Frankfurt", country: "DE", lat: 50.0379, lon: 8.5622 },
+];
+
 let server;
 
 test.before(async () => {
@@ -157,7 +172,26 @@ test("mobile dashboard stacks without horizontal overflow and uses compact Chef 
   });
 });
 
-async function withPage(fn) {
+test("entity/location JSON falls back to count breakdown and table instead of blank dashboard", async () => {
+  await withPage(async page => {
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, { title: "Airport Dataset", widgets: [] });
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#paste").fill(JSON.stringify(AIRPORTS, null, 2));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    const text = await page.locator("body").innerText();
+    assert.match(text, /Entity Overview/);
+    assert.match(text, /Records by Country/);
+    assert.match(text, /Rows/);
+    assert.match(text, /12 rows/);
+    assert.doesNotMatch(text, /^LAT$/im);
+    assert.doesNotMatch(text, /^LON$/im);
+    assert.doesNotMatch(text, /undefined/);
+  }, { allowConsole: /AI response did not validate, falling back/ });
+});
+
+async function withPage(fn, options = {}) {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ acceptDownloads: true, viewport: { width: 1440, height: 1100 } });
   const messages = [];
@@ -167,16 +201,19 @@ async function withPage(fn) {
   page.on("pageerror", error => messages.push(`pageerror: ${error.message}`));
   try {
     await fn(page);
-    assert.deepEqual(messages, []);
+    const unexpected = options.allowConsole
+      ? messages.filter(message => !options.allowConsole.test(message))
+      : messages;
+    assert.deepEqual(unexpected, []);
   } finally {
     await browser.close();
   }
 }
 
-async function mockInference(page, chefRecipe = CHEF_WITHOUT_OBSERVATIONS) {
+async function mockInference(page, chefRecipe = CHEF_WITHOUT_OBSERVATIONS, planRecipe = PLAN) {
   await page.route("**/api/cook", async route => {
     const body = route.request().postDataJSON();
-    const payload = body.kind === "chef" ? chefRecipe : PLAN;
+    const payload = body.kind === "chef" ? chefRecipe : planRecipe;
     await route.fulfill({
       status: 200,
       contentType: "application/json",

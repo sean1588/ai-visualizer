@@ -189,6 +189,23 @@ const RECIPE_SCHEMA: OutputSchema = {
               additionalProperties: false,
               properties: {
                 ...widgetBase,
+                type: { const: "countbar" },
+                fields: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    cat: { type: "string", description: "Category column to count records by." },
+                  },
+                  required: ["cat"],
+                },
+              },
+              required: widgetCommonRequired,
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                ...widgetBase,
                 type: { const: "table" },
                 fields: {
                   type: "object",
