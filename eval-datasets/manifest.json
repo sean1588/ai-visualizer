@@ -1,0 +1,91 @@
+[
+  {
+    "id": "local-airports",
+    "path": "raw/local-airports.json",
+    "source": "user-provided",
+    "shape": "entity-location",
+    "expectations": [
+      "renders non-empty dashboard",
+      "uses count/category breakdowns rather than lat/lon KPIs",
+      "includes a table/directory",
+      "does not show undefined values"
+    ]
+  },
+  {
+    "id": "vega-airports",
+    "path": "raw/vega-airports.csv",
+    "source": "https://cdn.jsdelivr.net/npm/vega-datasets@3/data/airports.csv",
+    "shape": "large-entity-location",
+    "expectations": [
+      "renders non-empty dashboard",
+      "does not treat latitude/longitude as business metrics",
+      "uses categorical/entity summaries and table"
+    ]
+  },
+  {
+    "id": "vega-stocks",
+    "path": "raw/vega-stocks.csv",
+    "source": "https://cdn.jsdelivr.net/npm/vega-datasets@3/data/stocks.csv",
+    "shape": "time-series",
+    "expectations": [
+      "uses date as x-axis",
+      "surfaces price trend",
+      "labels company/category fields clearly"
+    ]
+  },
+  {
+    "id": "vega-seattle-weather",
+    "path": "raw/vega-seattle-weather.csv",
+    "source": "https://cdn.jsdelivr.net/npm/vega-datasets@3/data/seattle-weather.csv",
+    "shape": "weather-time-series",
+    "expectations": [
+      "uses date as x-axis",
+      "surfaces temperature or precipitation trends",
+      "uses weather category only when relevant"
+    ]
+  },
+  {
+    "id": "vega-cars",
+    "path": "raw/vega-cars.json",
+    "source": "https://cdn.jsdelivr.net/npm/vega-datasets@3/data/cars.json",
+    "shape": "mixed-metrics-categories",
+    "expectations": [
+      "surfaces meaningful numeric metrics such as horsepower, MPG, weight, or acceleration",
+      "uses origin/cylinders/categories when relevant",
+      "does not produce blank or table-only output"
+    ]
+  },
+  {
+    "id": "vega-barley",
+    "path": "raw/vega-barley.json",
+    "source": "https://cdn.jsdelivr.net/npm/vega-datasets@3/data/barley.json",
+    "shape": "categorical-measurements",
+    "expectations": [
+      "uses yield as the numeric measure",
+      "uses variety/site/year categories clearly",
+      "avoids overly crowded labels"
+    ]
+  },
+  {
+    "id": "vega-movies",
+    "path": "raw/vega-movies.json",
+    "source": "https://cdn.jsdelivr.net/npm/vega-datasets@3/data/movies.json",
+    "shape": "larger-mixed-metadata",
+    "expectations": [
+      "renders within a reasonable time",
+      "does not overwhelm with raw tables only",
+      "uses ratings/gross/genre/year fields when available"
+    ]
+  },
+  {
+    "id": "generated-messy-saas",
+    "path": "raw/generated-messy-saas.json",
+    "source": "synthetic",
+    "shape": "messy-time-series",
+    "expectations": [
+      "handles null and blank values",
+      "uses month as the time axis",
+      "surfaces revenue/users/conversion without undefined values"
+    ]
+  }
+]

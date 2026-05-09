@@ -1,0 +1,218 @@
+[
+  {
+    "month": "2025-01-01",
+    "segment": "enterprise",
+    "channel": "paid",
+    "revenue": null,
+    "users": 420,
+    "conversion_rate": "",
+    "notes": "promo spike"
+  },
+  {
+    "month": "2025-02-01",
+    "segment": "startup",
+    "channel": "partner",
+    "revenue": 20150,
+    "users": 448,
+    "conversion_rate": 0.083,
+    "notes": ""
+  },
+  {
+    "month": "2025-03-01",
+    "segment": "education",
+    "channel": "direct",
+    "revenue": 22300,
+    "users": 476,
+    "conversion_rate": 0.086,
+    "notes": ""
+  },
+  {
+    "month": "2025-04-01",
+    "segment": "nonprofit",
+    "channel": "organic",
+    "revenue": 22350,
+    "users": 504,
+    "conversion_rate": 0.089,
+    "notes": ""
+  },
+  {
+    "month": "2025-05-01",
+    "segment": "enterprise",
+    "channel": "paid",
+    "revenue": 24500,
+    "users": 532,
+    "conversion_rate": 0.092,
+    "notes": ""
+  },
+  {
+    "month": "2025-06-01",
+    "segment": "startup",
+    "channel": "partner",
+    "revenue": 26650,
+    "users": 560,
+    "conversion_rate": "",
+    "notes": ""
+  },
+  {
+    "month": "2025-07-01",
+    "segment": "education",
+    "channel": "direct",
+    "revenue": 26700,
+    "users": 588,
+    "conversion_rate": 0.098,
+    "notes": "promo spike"
+  },
+  {
+    "month": "2025-08-01",
+    "segment": "nonprofit",
+    "channel": "organic",
+    "revenue": null,
+    "users": 616,
+    "conversion_rate": 0.101,
+    "notes": ""
+  },
+  {
+    "month": "2025-09-01",
+    "segment": "enterprise",
+    "channel": "paid",
+    "revenue": 31000,
+    "users": 644,
+    "conversion_rate": 0.104,
+    "notes": ""
+  },
+  {
+    "month": "2025-10-01",
+    "segment": "startup",
+    "channel": "partner",
+    "revenue": 31050,
+    "users": 672,
+    "conversion_rate": 0.107,
+    "notes": ""
+  },
+  {
+    "month": "2025-11-01",
+    "segment": "education",
+    "channel": "direct",
+    "revenue": 33200,
+    "users": 700,
+    "conversion_rate": "",
+    "notes": ""
+  },
+  {
+    "month": "2025-12-01",
+    "segment": "nonprofit",
+    "channel": "organic",
+    "revenue": 35350,
+    "users": 728,
+    "conversion_rate": 0.113,
+    "notes": ""
+  },
+  {
+    "month": "2025-01-01",
+    "segment": "enterprise",
+    "channel": "paid",
+    "revenue": 35400,
+    "users": 756,
+    "conversion_rate": 0.116,
+    "notes": "promo spike"
+  },
+  {
+    "month": "2025-02-01",
+    "segment": "startup",
+    "channel": "partner",
+    "revenue": 37550,
+    "users": 784,
+    "conversion_rate": 0.119,
+    "notes": ""
+  },
+  {
+    "month": "2025-03-01",
+    "segment": "education",
+    "channel": "direct",
+    "revenue": null,
+    "users": 812,
+    "conversion_rate": 0.122,
+    "notes": ""
+  },
+  {
+    "month": "2025-04-01",
+    "segment": "nonprofit",
+    "channel": "organic",
+    "revenue": 39750,
+    "users": 840,
+    "conversion_rate": "",
+    "notes": ""
+  },
+  {
+    "month": "2025-05-01",
+    "segment": "enterprise",
+    "channel": "paid",
+    "revenue": 41900,
+    "users": 868,
+    "conversion_rate": 0.128,
+    "notes": ""
+  },
+  {
+    "month": "2025-06-01",
+    "segment": "startup",
+    "channel": "partner",
+    "revenue": 44050,
+    "users": 896,
+    "conversion_rate": 0.131,
+    "notes": ""
+  },
+  {
+    "month": "2025-07-01",
+    "segment": "education",
+    "channel": "direct",
+    "revenue": 44100,
+    "users": 924,
+    "conversion_rate": 0.134,
+    "notes": "promo spike"
+  },
+  {
+    "month": "2025-08-01",
+    "segment": "nonprofit",
+    "channel": "organic",
+    "revenue": 46250,
+    "users": 952,
+    "conversion_rate": 0.137,
+    "notes": ""
+  },
+  {
+    "month": "2025-09-01",
+    "segment": "enterprise",
+    "channel": "paid",
+    "revenue": 48400,
+    "users": 980,
+    "conversion_rate": "",
+    "notes": ""
+  },
+  {
+    "month": "2025-10-01",
+    "segment": "startup",
+    "channel": "partner",
+    "revenue": null,
+    "users": 1008,
+    "conversion_rate": 0.143,
+    "notes": ""
+  },
+  {
+    "month": "2025-11-01",
+    "segment": "education",
+    "channel": "direct",
+    "revenue": 50600,
+    "users": 1036,
+    "conversion_rate": 0.146,
+    "notes": ""
+  },
+  {
+    "month": "2025-12-01",
+    "segment": "nonprofit",
+    "channel": "organic",
+    "revenue": 52750,
+    "users": 1064,
+    "conversion_rate": 0.149,
+    "notes": ""
+  }
+]
