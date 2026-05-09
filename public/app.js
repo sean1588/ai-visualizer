@@ -321,7 +321,7 @@ function parseAndValidateRecipe(raw, schema, rows) {
   if (!validated.length) return null;
 
   // Promote table to bottom if the model put it elsewhere
-  const tables = validated.filter(w => w.type === 'table');
+  const tables = validated.filter(w => w.type === 'table').slice(0, 1);
   const others = validated.filter(w => w.type !== 'table');
   const final = [...others, ...tables];
 
@@ -1351,7 +1351,9 @@ function chefValidateRecipe(parsed, schema) {
       widgets.push({ type:'observations', span: 12, title: w.title || 'What we noticed', observations: obs });
     }
   }
-  return { widgets, dropped };
+  const tables = widgets.filter(w => w.type === 'table').slice(0, 1);
+  const others = widgets.filter(w => w.type !== 'table');
+  return { widgets: [...others, ...tables], dropped };
 }
 
 function applyPendingHighlights() {
