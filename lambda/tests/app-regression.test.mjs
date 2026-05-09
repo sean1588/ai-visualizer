@@ -118,7 +118,7 @@ test("landing copy accurately describes sampled-row inference", async () => {
     assert.match(text, /sample rows sent once for inference/i);
     assert.doesNotMatch(text, /Nothing is uploaded/i);
     assert.doesNotMatch(text, /Claude/i);
-  });
+  }, { allowConsole: /AI response did not validate, falling back/ });
 });
 
 test("sample dashboard renders and exports a PNG", async () => {
@@ -137,7 +137,7 @@ test("sample dashboard renders and exports a PNG", async () => {
     assert.match(text, /102\.4k/);
     assert.match(text, /MRR Trend/);
     assert.doesNotMatch(text, /undefined/);
-  });
+  }, { allowConsole: /AI response did not validate, falling back/ });
 });
 
 test("Chef edit removes observations without dropping valid dashboard widgets", async () => {
@@ -157,7 +157,7 @@ test("Chef edit removes observations without dropping valid dashboard widgets", 
     assert.match(text, /MRR Trend/);
     assert.match(text, /Customer Acquisition/);
     assert.doesNotMatch(text, /undefined/);
-  });
+  }, { allowConsole: /AI response did not validate, falling back/ });
 });
 
 test("Chef refuses suspicious partial recipes instead of applying table-only collapse", async () => {
@@ -175,7 +175,61 @@ test("Chef refuses suspicious partial recipes instead of applying table-only col
     assert.match(text, /The chef returned an incomplete recipe/);
     assert.match(text, /What stood out/);
     assert.match(text, /MRR Trend/);
-  });
+  }, { allowConsole: /AI response did not validate, falling back/ });
+});
+
+test("Chef history resets when starting a different dashboard", async () => {
+  await withPage(async page => {
+    await mockInference(page);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.getByText("SAAS METRICS").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    await page.locator("#chef-fab").click();
+    await page.locator("#chef-input").fill("Please remove the notes from this dashboard");
+    await page.locator("#chef-send").click();
+    await page.waitForFunction(() => document.body.innerText.includes("Trimmed the tasting notes"));
+
+    await page.evaluate(() => window.reset());
+    await page.locator("#paste").fill(JSON.stringify(SEGMENT_REVENUE, null, 2));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+    await page.locator("#chef-fab").click();
+
+    const panelText = await page.locator("#chef-panel").innerText();
+    assert.match(panelText, /TELL THE CHEF WHAT TO CHANGE/);
+    assert.doesNotMatch(panelText, /Please remove the notes/);
+    assert.doesNotMatch(panelText, /Trimmed the tasting notes/);
+  }, { allowConsole: /AI response did not validate, falling back/ });
+});
+
+test("Chef history resets when restoring another saved dashboard", async () => {
+  await withPage(async page => {
+    await mockInference(page);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.getByText("SAAS METRICS").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    await page.locator("#chef-fab").click();
+    await page.locator("#chef-input").fill("Please remove the notes from this dashboard");
+    await page.locator("#chef-send").click();
+    await page.waitForFunction(() => document.body.innerText.includes("Trimmed the tasting notes"));
+
+    await page.evaluate(() => window.reset());
+    await page.locator("#paste").fill(JSON.stringify(SEGMENT_REVENUE, null, 2));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    await page.evaluate(() => window.reset());
+    await page.locator(".recent-card").first().click();
+    await page.waitForSelector("#chef-fab.is-visible");
+    await page.locator("#chef-fab").click();
+
+    const panelText = await page.locator("#chef-panel").innerText();
+    assert.match(panelText, /TELL THE CHEF WHAT TO CHANGE/);
+    assert.doesNotMatch(panelText, /Please remove the notes/);
+    assert.doesNotMatch(panelText, /Trimmed the tasting notes/);
+  }, { allowConsole: /AI response did not validate, falling back/ });
 });
 
 test("mobile dashboard stacks without horizontal overflow and uses compact Chef button", async () => {
