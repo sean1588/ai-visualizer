@@ -105,6 +105,7 @@ const RECIPE_SCHEMA: OutputSchema = {
                   additionalProperties: false,
                   properties: {
                     metric: { type: "string", description: "Numeric column name to aggregate." },
+                    aggregate: { enum: ["last", "sum", "average", "count"], description: "How to summarize the numeric column." },
                     spark: { type: "string", description: "Optional date column for the sparkline." },
                   },
                   required: ["metric"],

@@ -59,6 +59,40 @@ const AIRPORTS = [
   { code: "FRA", name: "Frankfurt Airport", city: "Frankfurt", country: "DE", lat: 50.0379, lon: 8.5622 },
 ];
 
+const SEGMENT_REVENUE = [
+  { segment: "startup", revenue: 12000, channel: "organic" },
+  { segment: "startup", revenue: 8000, channel: "paid" },
+  { segment: "midmarket", revenue: 24000, channel: "organic" },
+  { segment: "midmarket", revenue: 16000, channel: "partner" },
+  { segment: "enterprise", revenue: 60000, channel: "partner" },
+];
+
+const AGGREGATE_PLAN = {
+  title: "Segment Revenue",
+  widgets: [
+    { type: "kpi", span: 3, title: "Total Revenue", fields: { metric: "revenue", aggregate: "sum" } },
+    { type: "kpi", span: 3, title: "Average Revenue", fields: { metric: "revenue", aggregate: "average" } },
+    { type: "bar", span: 6, title: "Revenue by Segment", fields: { x: "segment", y: "revenue" } },
+    { type: "table", span: 12, title: "Rows", fields: { limit: 10 } },
+  ],
+};
+
+const BARLEY = [
+  { yield: 27.0, variety: "Manchuria", year: 1931, site: "University Farm" },
+  { yield: 43.1, variety: "Manchuria", year: 1932, site: "University Farm" },
+  { yield: 34.7, variety: "Glabron", year: 1931, site: "Waseca" },
+  { yield: 55.2, variety: "Glabron", year: 1932, site: "Waseca" },
+  { yield: 39.3, variety: "No. 457", year: 1931, site: "Morris" },
+  { yield: 58.1, variety: "No. 457", year: 1932, site: "Morris" },
+];
+
+const TABLE_ONLY_PLAN = {
+  title: "Barley Trial",
+  widgets: [
+    { type: "table", span: 12, title: "Rows", fields: { limit: 10 } },
+  ],
+};
+
 let server;
 
 test.before(async () => {
@@ -187,6 +221,40 @@ test("entity/location JSON falls back to count breakdown and table instead of bl
     assert.match(text, /12 rows/);
     assert.doesNotMatch(text, /^LAT$/im);
     assert.doesNotMatch(text, /^LON$/im);
+    assert.doesNotMatch(text, /undefined/);
+  }, { allowConsole: /AI response did not validate, falling back/ });
+});
+
+test("category bar charts aggregate repeated labels instead of rendering one bar per row", async () => {
+  await withPage(async page => {
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, AGGREGATE_PLAN);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#paste").fill(JSON.stringify(SEGMENT_REVENUE, null, 2));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    const text = await page.locator("body").innerText();
+    assert.match(text, /120k/);
+    assert.match(text, /24k/);
+    assert.match(text, /Revenue by Segment/);
+    assert.match(text, /bar · 3 groups/i);
+    assert.doesNotMatch(text, /bar · 5\b/i);
+    assert.doesNotMatch(text, /undefined/);
+  });
+});
+
+test("chartable table-only model output falls back to a useful dashboard", async () => {
+  await withPage(async page => {
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, TABLE_ONLY_PLAN);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#paste").fill(JSON.stringify(BARLEY, null, 2));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    const text = await page.locator("body").innerText();
+    assert.match(text, /Showing a default layout based on your schema/);
+    assert.match(text, /bar|donut|line|count/i);
+    assert.match(text, /Raw rows|Rows/i);
     assert.doesNotMatch(text, /undefined/);
   }, { allowConsole: /AI response did not validate, falling back/ });
 });

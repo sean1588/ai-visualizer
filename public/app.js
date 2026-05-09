@@ -160,6 +160,7 @@ function inferSchema(rows) {
 const VALID_WIDGET_TYPES = new Set(['kpi','line','bar','donut','statlist','countbar','table']);
 const VALID_SPANS = new Set([3, 4, 6, 8, 12]);
 const COORDINATE_COLUMNS = new Set(['lat', 'latitude', 'lon', 'lng', 'long', 'longitude']);
+const KPI_AGGREGATES = new Set(['last', 'sum', 'average', 'count']);
 
 function isCoordinateColumn(name) {
   return COORDINATE_COLUMNS.has(String(name || '').trim().toLowerCase());
@@ -167,6 +168,25 @@ function isCoordinateColumn(name) {
 
 function isMeaningfulMetricColumn(col) {
   return col?.type === 'number' && !isCoordinateColumn(col.name);
+}
+
+function hasUsefulChartOpportunity(schema) {
+  return schema.some(isMeaningfulMetricColumn) || schema.some(c => c.type === 'category');
+}
+
+function isTableOnlyRecipe(widgets) {
+  const rendered = (widgets || []).filter(w => w.type !== 'observations');
+  return rendered.length > 0 && rendered.every(w => w.type === 'table');
+}
+
+function normalizeKpiAggregate(value, title = '') {
+  const explicit = String(value || '').toLowerCase();
+  if (KPI_AGGREGATES.has(explicit)) return explicit;
+  const t = String(title || '').toLowerCase();
+  if (/\b(total|sum|gross|overall)\b/.test(t)) return 'sum';
+  if (/\b(avg|average|mean)\b/.test(t)) return 'average';
+  if (/\b(count|records|rows|number of)\b/.test(t)) return 'count';
+  return 'last';
 }
 
 // LLM proxy. The API key lives server-side in the Lambda.
@@ -225,6 +245,7 @@ Column-typing rules (HARD):
 - "line.x" — date column. If the schema has no date column, do not emit a line widget.
 - "bar.x", "donut.cat", "statlist.cat" — category column.
 - "countbar.cat" — category column; use this when the dataset has useful categories but no meaningful numeric metric.
+- "kpi.aggregate" — optional: "last", "sum", "average", or "count". Use "sum" for totals, "average" for averages, and "last" for latest/current values.
 - All "fields" values must reference column names that appear in <SCHEMA> verbatim.
 
 Layout rules:
@@ -245,7 +266,7 @@ async function planRecipe(rows, schema, notes) {
       new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 55000))
     ]);
     const recipe = parseAndValidateRecipe(raw, schema, rows);
-    if (recipe && recipe.widgets.length) return recipe;
+    if (recipe && recipe.widgets.length && !(isTableOnlyRecipe(recipe.widgets) && hasUsefulChartOpportunity(schema))) return recipe;
     console.warn('[recipe] AI response did not validate, falling back', raw);
   } catch (e) {
     console.warn('[recipe] AI call failed, falling back to deterministic planner:', e.message);
@@ -289,15 +310,16 @@ function parseAndValidateRecipe(raw, schema, rows) {
     if (w.type === 'countbar' && !isGroup(fields.cat)) continue;
     // KPI value/delta — compute from data
     if (w.type === 'kpi') {
+      const aggregate = normalizeKpiAggregate(fields.aggregate, w.title);
       const vals = rows.map(r => r[fields.metric]).filter(v => typeof v === 'number');
-      const last = vals[vals.length - 1] ?? 0;
-      const prev = vals[vals.length - 2] ?? last;
+      const computed = computeKPIFromValues(vals, aggregate);
       validated.push({
         type: 'kpi', span,
         label: w.title || humanize(fields.metric),
-        value: fmtCompact(last),
-        delta: prev ? ((last - prev) / Math.abs(prev)) * 100 : null,
-        sparkCol: colNames.has(fields.spark) ? fields.spark : fields.metric
+        value: computed.value,
+        delta: computed.delta,
+        aggregate,
+        sparkCol: aggregate === 'last' ? fields.metric : null
       });
       continue;
     }
@@ -422,6 +444,16 @@ function countBy(rows, catKey) {
   }
   return [...map.entries()].map(([k, v]) => ({ key: k, value: v }))
     .sort((a, b) => b.value - a.value || a.key.localeCompare(b.key));
+}
+
+function columnType(name) {
+  return state.schema?.find(c => c.name === name)?.type;
+}
+
+function hashString(s) {
+  let h = 0;
+  for (let i = 0; i < String(s).length; i++) h = ((h << 5) - h) + String(s).charCodeAt(i);
+  return Math.abs(h);
 }
 
 // ─── helpers ────────────────────────────────────────────────────────
@@ -659,7 +691,11 @@ function widgetLine(w) {
 }
 
 function widgetBar(w) {
-  const data = state.rows.map(r => ({ x: r[w.x], y: r[w.y] })).filter(p => typeof p.y === 'number');
+  const xType = columnType(w.x);
+  const shouldAggregate = xType === 'category' || xType === 'string';
+  const data = shouldAggregate
+    ? aggregateBy(state.rows, w.x, w.y).slice(0, 12).map(d => ({ x: d.key, y: d.value }))
+    : state.rows.map(r => ({ x: r[w.x], y: r[w.y] })).filter(p => typeof p.y === 'number');
   if (!data.length) return '';
   const W = 400, H = 200, pl = 44, pr = 12, pt = 18, pb = 28;
   const ys = data.map(d => d.y);
@@ -667,7 +703,7 @@ function widgetBar(w) {
   const bw = (W - pl - pr) / data.length;
   const yScale = y => H - pb - ((y - yMin) / (yMax - yMin || 1)) * (H - pt - pb);
   const colors = ['var(--accent-2)', 'var(--accent-3)', 'var(--accent-4)'];
-  const c = colors[Math.floor(Math.random() * colors.length)];
+  const c = colors[hashString(`${w.title}:${w.x}:${w.y}`) % colors.length];
   const yTicks = 3;
   const yTickLines = Array.from({length: yTicks+1}, (_,i) => {
     const v = yMin + (yMax - yMin) * (i / yTicks);
@@ -686,7 +722,7 @@ function widgetBar(w) {
       return `<text class="axis-tick" x="${pl + idx*bw + bw/2}" y="${H-10}" text-anchor="middle">${escapeHTML(String(d.x).slice(0,7))}</text>`;
     }).join('');
   return `<div class="w w-chart" style="grid-column:span ${w.span};">
-    <div class="w-hd"><h3>${escapeHTML(w.title)}</h3><span class="meta">bar · ${data.length}</span></div>
+    <div class="w-hd"><h3>${escapeHTML(w.title)}</h3><span class="meta">bar · ${data.length}${shouldAggregate ? ' groups' : ''}</span></div>
     <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
       ${yTickLines}${bars}${xLabels}
     </svg>
@@ -1029,7 +1065,7 @@ const chef = {
 // widget arrays so we can highlight only the ones that actually changed.
 function widgetFingerprint(w) {
   if (!w || !w.type) return '';
-  if (w.type === 'kpi')      return `kpi:${w.metric?.value || w.value || ''}:${w.label || w.title || ''}`;
+  if (w.type === 'kpi')      return `kpi:${w.aggregate || 'last'}:${w.metric?.value || w.value || ''}:${w.label || w.title || ''}`;
   if (w.type === 'line')     return `line:${w.x}:${w.y}`;
   if (w.type === 'bar')      return `bar:${w.x}:${w.y}`;
   if (w.type === 'donut')    return `donut:${w.cat}:${w.metric}`;
@@ -1160,7 +1196,7 @@ Return ONLY a JSON object (no prose, no code fences). Shape:
 }
 
 Widget shapes — use these exactly:
-- kpi:      { "type":"kpi", "span":3, "title":"...", "fields":{ "metric":"<numeric col>", "spark":"<date col, optional>" } }
+- kpi:      { "type":"kpi", "span":3, "title":"...", "fields":{ "metric":"<numeric col>", "aggregate":"last|sum|average|count, optional", "spark":"<date col, optional>" } }
 - line:     { "type":"line", "span":8, "title":"...", "fields":{ "x":"<date col>", "y":"<numeric col>" } }
 - bar:      { "type":"bar", "span":6, "title":"...", "fields":{ "x":"<date or category col>", "y":"<numeric col>" } }
 - donut:    { "type":"donut", "span":6, "title":"...", "fields":{ "cat":"<category col>", "metric":"<numeric col>" } }
@@ -1191,11 +1227,12 @@ function toCanonicalWidget(w) {
   if (w.type === 'kpi') {
     const metric = w.fields?.metric || inferMetricFromLabel(w.label || w.title);
     if (!metric) return null;
+    const aggregate = normalizeKpiAggregate(w.fields?.aggregate || w.aggregate, w.title || w.label);
     return {
       type: 'kpi',
       span,
       title: w.title || w.label || humanize(metric),
-      fields: { metric, ...(w.sparkCol ? { spark: w.sparkCol } : {}) }
+      fields: { metric, aggregate, ...(w.sparkCol ? { spark: w.sparkCol } : {}) }
     };
   }
   if (w.type === 'line' || w.type === 'bar') {
@@ -1323,7 +1360,8 @@ function chefValidateRecipe(parsed, schema) {
     // Field validation per type
     if (w.type === 'kpi') {
       if (!isNumberCol(fields.metric)) { dropped++; continue; }
-      const kpi = computeKPI(fields.metric);
+      const aggregate = normalizeKpiAggregate(fields.aggregate, w.title || canonical?.title);
+      const kpi = computeKPI(fields.metric, aggregate);
       widgets.push({
         type:'kpi',
         span,
@@ -1331,7 +1369,8 @@ function chefValidateRecipe(parsed, schema) {
         title: w.title || canonical?.title,
         value: kpi.value,
         delta: kpi.delta,
-        sparkCol: isDateCol(fields.spark) ? fields.spark : fields.metric
+        aggregate,
+        sparkCol: aggregate === 'last' ? fields.metric : null
       });
     } else if (w.type === 'line' || w.type === 'bar') {
       if (!hasCol(fields.x) || !isNumberCol(fields.y)) { dropped++; continue; }
@@ -1374,14 +1413,25 @@ function applyPendingHighlights() {
   chef.pendingHighlight = null;
 }
 
-// Compute a KPI value from a column name (mirrors what the planner does)
-function computeKPI(colName) {
-  const vals = state.rows.map(r => r[colName]).filter(v => typeof v === 'number');
+function computeKPIFromValues(vals, aggregate = 'last') {
   if (!vals.length) return { value: '—', delta: null };
+  if (aggregate === 'count') return { value: formatNum(vals.length), delta: null };
+  if (aggregate === 'sum') {
+    return { value: formatNum(vals.reduce((sum, v) => sum + v, 0)), delta: null };
+  }
+  if (aggregate === 'average') {
+    return { value: formatNum(vals.reduce((sum, v) => sum + v, 0) / vals.length), delta: null };
+  }
   const last = vals[vals.length - 1];
   const prev = vals[vals.length - 2] ?? last;
   const delta = prev ? ((last - prev) / Math.abs(prev)) * 100 : 0;
   return { value: formatNum(last), delta };
+}
+
+// Compute a KPI value from a column name (mirrors what the planner does)
+function computeKPI(colName, aggregate = 'last') {
+  const vals = state.rows.map(r => r[colName]).filter(v => typeof v === 'number');
+  return computeKPIFromValues(vals, aggregate);
 }
 function formatNum(n) {
   if (Math.abs(n) >= 1e9) return (n/1e9).toFixed(1).replace(/\.0$/,'') + 'b';
