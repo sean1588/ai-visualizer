@@ -323,22 +323,25 @@
     /* dashboard */
     .dash-head { padding: 28px 18px 12px; }
     .dash-head h1 { font-size: 28px; }
-    .dash-grid { padding: 12px 14px 80px; gap: 10px; }
+    .dash-grid { padding: 12px 14px 120px; gap: 12px; }
     .w { padding: 16px; min-height: 0; }
     .w-3, .w-4, .w-6, .w-8, .w-12 { grid-column: span 12; }
+    .dash-grid > .w { grid-column: 1 / -1 !important; }
 
     /* tighten widget headers */
     .w-hd h3 { font-size: 15px; }
     .kpi-value { font-size: 36px; }
     .obs-item { grid-template-columns: 28px 1fr; gap: 12px; }
-    table { font-size: 12.5px; }
-    th, td { padding: 7px 8px; }
+    .w-table { overflow-x: auto; }
+    .w-table table { min-width: 620px; font-size: 12.5px; }
+    .w-table th, .w-table td { padding: 8px 9px; }
 
     /* The Chef → tighter sizing on top of the 768px bottom-sheet rules */
     .chef-fab {
       right: 14px; bottom: 14px;
-      padding: 11px 16px 11px 12px;
+      padding: 10px 14px 10px 11px;
       font-size: 10.5px;
+      box-shadow: 3px 3px 0 var(--rule);
     }
     .chef-hd { padding: 12px 14px; }
     .chef-hd-name { font-size: 17px; }
@@ -385,7 +388,7 @@
     <div class="empty-card">
       <div class="empty-eyebrow"><span class="eyebrow eyebrow-accent">A new dashboard</span></div>
       <h1>Drop a file. Or paste your data.</h1>
-      <p class="lede">Mise reads the schema, lays out the widgets, and renders the dashboard right here in your browser. Nothing is uploaded; nothing is stored.</p>
+      <p class="lede">Mise reads your schema, samples a few rows for inference, and renders the dashboard right here in your browser. Nothing is stored.</p>
 
       <div id="drop" class="drop">
         <div class="drop-icon">
@@ -405,7 +408,7 @@
           <summary class="notes-label">
             <span class="notes-toggle-icon" aria-hidden="true">+</span>
             <span class="notes-key">Notes</span>
-            <span class="notes-meta">optional · nudges Claude’s layout</span>
+            <span class="notes-meta">optional · nudges the AI layout</span>
           </summary>
           <textarea id="notes" class="drop-notes" maxlength="1000" placeholder="e.g. Treat 'plan' as the primary segment. Highlight churn over 5%. Add a callout if revenue grew faster than headcount."></textarea>
         </details>
@@ -413,7 +416,7 @@
         <div class="drop-actions">
           <button id="render-btn" class="btn btn-primary btn-lg">Render dashboard →</button>
         </div>
-        <div class="drop-meta">Schema inferred locally · sent to inference once · never stored</div>
+        <div class="drop-meta">Schema inferred locally · sample rows sent once for inference · never stored</div>
         <div id="err" class="err" style="display:none;"></div>
       </div>
 
@@ -443,7 +446,7 @@
     <div class="loading-left">
       <div class="eyebrow eyebrow-accent" style="margin-bottom:14px;">— Reading the data —</div>
       <h2 id="loading-title">We're getting to know your data.</h2>
-      <p style="color:var(--fg-mute);font-size:15px;margin:0 0 24px;">Schema first, layout second. We see your data once, decide what to render, then forget it.</p>
+      <p style="color:var(--fg-mute);font-size:15px;margin:0 0 24px;">Schema first, layout second. We send a small sample once, decide what to render, then forget it.</p>
       <div id="loading-file" class="file">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#1f1c16" stroke-width="1.4"><rect x="2" y="1" width="10" height="12"/><path d="M5 5h4M5 7h4M5 9h2"/></svg>
         <span id="loading-file-text">data · — rows · — cols</span>

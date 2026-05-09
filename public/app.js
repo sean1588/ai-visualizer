@@ -1,4 +1,4 @@
-/* Mise prototype — paste/drop → Claude infers layout → render dashboard */
+/* Mise prototype — paste/drop → AI infers layout → render dashboard */
 
 // ─── samples ────────────────────────────────────────────────────────
 const SAMPLES = {
@@ -152,8 +152,8 @@ function inferSchema(rows) {
   });
 }
 
-// ─── recipe planner — Claude does the layout decision ──────────────
-// The deterministic planner below is ONLY a safety net for when Claude
+// ─── recipe planner — AI does the layout decision ──────────────────
+// The deterministic planner below is ONLY a safety net for when the model
 // is unreachable, returns garbage, or times out. The whole product
 // hinges on the AI making smart layout choices from the schema.
 
@@ -236,9 +236,9 @@ async function planRecipe(rows, schema, notes) {
     ]);
     const recipe = parseAndValidateRecipe(raw, schema, rows);
     if (recipe && recipe.widgets.length) return recipe;
-    console.warn('[recipe] Claude response did not validate, falling back', raw);
+    console.warn('[recipe] AI response did not validate, falling back', raw);
   } catch (e) {
-    console.warn('[recipe] Claude call failed, falling back to deterministic planner:', e.message);
+    console.warn('[recipe] AI call failed, falling back to deterministic planner:', e.message);
   }
   // Safety net
   const fallback = deterministicRecipe(rows, schema);
@@ -301,7 +301,7 @@ function parseAndValidateRecipe(raw, schema, rows) {
   }
   if (!validated.length) return null;
 
-  // Promote table to bottom if Claude put it elsewhere
+  // Promote table to bottom if the model put it elsewhere
   const tables = validated.filter(w => w.type === 'table');
   const others = validated.filter(w => w.type !== 'table');
   const final = [...others, ...tables];
@@ -321,7 +321,7 @@ function parseAndValidateRecipe(raw, schema, rows) {
   return { title, widgets: final };
 }
 
-// Deterministic safety net — only used if Claude fails.
+// Deterministic safety net — only used if the model fails.
 function deterministicRecipe(rows, schema) {
   const dateCol = schema.find(c => c.type === 'date');
   const numCols = schema.filter(c => c.type === 'number');
@@ -421,7 +421,7 @@ function renderDashboard() {
   if (state.recipe.fallback) {
     banner = `<div class="w w-banner" style="grid-column:span 12;">
       <span class="banner-eyebrow">⚠ Couldn’t reach the AI</span>
-      <span class="banner-msg">Showing a default layout based on your schema. Try again to get a Claude-designed dashboard.</span>
+      <span class="banner-msg">Showing a default layout based on your schema. Try again to get an AI-designed dashboard.</span>
     </div>`;
   }
   grid.innerHTML = banner + state.recipe.widgets.map(w => {
@@ -741,57 +741,48 @@ function exportRecipe() {
 }
 async function exportPNG() {
   if (!state.recipe) return;
-  // Use SVG foreignObject technique: serialize the dashboard DOM, wrap in SVG,
-  // rasterize via canvas. Lightweight, no external deps.
+  if (!window.html2canvas) {
+    await loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');
+  }
   const dash = document.getElementById('stage-dash');
-  const rect = dash.getBoundingClientRect();
-  const w = Math.ceil(rect.width), h = Math.ceil(dash.scrollHeight);
-  // Inline computed CSS variables on the snapshot root so it renders standalone
-  const root = getComputedStyle(document.documentElement);
-  const vars = ['--bg','--bg-elev','--bg-soft','--fg','--fg-mute','--rule','--rule-soft','--accent','--accent-2','--accent-3','--accent-4','--font-body','--font-display','--font-mono'];
-  const styleVars = vars.map(v => `${v}: ${root.getPropertyValue(v).trim()};`).join('');
-  const cssLink = `<style>${getEmbeddedCSS()}</style>`;
-  const cloned = dash.cloneNode(true);
-  cloned.setAttribute('style', `width:${w}px; ${styleVars} background: ${root.getPropertyValue('--bg').trim()};`);
-  const xhtml = new XMLSerializer().serializeToString(cloned);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
-    <foreignObject width="100%" height="100%">
-      <div xmlns="http://www.w3.org/1999/xhtml">${cssLink}${xhtml}</div>
-    </foreignObject>
-  </svg>`;
-  const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const img = new Image();
-  img.onload = () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = w * 2; canvas.height = h * 2;  // 2x for retina
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = root.getPropertyValue('--bg').trim() || '#f5f2ec';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.scale(2, 2);
-    ctx.drawImage(img, 0, 0);
+  try {
+    const canvas = await window.html2canvas(dash, {
+      backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#f5f2ec',
+      scale: Math.min(2, window.devicePixelRatio || 1),
+      useCORS: true,
+      logging: false,
+      windowWidth: document.documentElement.scrollWidth,
+      windowHeight: dash.scrollHeight,
+    });
     canvas.toBlob(b => {
+      if (!b) {
+        flashStatus('Export failed', true);
+        return;
+      }
       const fname = (state.recipe.title || 'dashboard').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g,'');
       downloadFile(`${fname}.png`, b);
       flashStatus('PNG exported');
     }, 'image/png');
-    URL.revokeObjectURL(url);
-  };
-  img.onerror = () => {
-    URL.revokeObjectURL(url);
+  } catch (e) {
+    console.warn('[export] PNG export failed', e);
     flashStatus('Export failed', true);
-  };
-  img.src = url;
-}
-function getEmbeddedCSS() {
-  // pull in all stylesheet rules so the cloned DOM looks right standalone
-  const rules = [];
-  for (const sheet of document.styleSheets) {
-    try {
-      for (const rule of sheet.cssRules) rules.push(rule.cssText);
-    } catch (e) { /* cross-origin */ }
   }
-  return rules.join('\n');
+}
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      existing.addEventListener('load', resolve, { once: true });
+      existing.addEventListener('error', reject, { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error(`Failed to load ${src}`));
+    document.head.appendChild(script);
+  });
 }
 function flashStatus(msg, isErr) {
   const pill = document.getElementById('status-pill');
@@ -826,7 +817,7 @@ async function runPipeline(rawText) {
   renderSchema(state.schema);
   await stepAdvance('infer', 200);
 
-  // step 3: layout (Claude)
+  // step 3: layout (AI)
   setStepActive('layout');
   const notes = document.getElementById('notes')?.value || '';
   state.recipe = await planRecipe(rows, state.schema, notes);
@@ -962,7 +953,7 @@ const chef = {
 // widget arrays so we can highlight only the ones that actually changed.
 function widgetFingerprint(w) {
   if (!w || !w.type) return '';
-  if (w.type === 'kpi')      return `kpi:${w.metric?.value || ''}:${w.label || w.title || ''}`;
+  if (w.type === 'kpi')      return `kpi:${w.metric?.value || w.value || ''}:${w.label || w.title || ''}`;
   if (w.type === 'line')     return `line:${w.x}:${w.y}`;
   if (w.type === 'bar')      return `bar:${w.x}:${w.y}`;
   if (w.type === 'donut')    return `donut:${w.cat}:${w.metric}`;
@@ -1055,11 +1046,11 @@ function chefBuildPrompt(userRequest) {
   const sample = (state.rows || []).slice(0, 6);
   const sampleStr = sample.map(r => JSON.stringify(r)).join('\n');
   const schemaStr = (state.schema || []).map(c =>
-    `- ${c.name} (${c.type})${c.cardinality ? ' · ' + c.cardinality + ' unique' : ''}`
+    `- ${c.name} (${c.type})${c.unique ? ' · ' + c.unique + ' unique' : ''}`
   ).join('\n');
   const currentRecipe = JSON.stringify({
     title: state.recipe.title,
-    widgets: state.recipe.widgets
+    widgets: toCanonicalWidgets(state.recipe.widgets)
   }, null, 2);
   const safeRequest = String(userRequest || '').slice(0, 1000);
 
@@ -1105,7 +1096,56 @@ Rules:
 - Span values per row should sum to multiples of 12 (3+3+3+3, 6+6, 8+4, 12).
 - Only reference column names that exist in the schema.
 - Keep widgets the user didn't mention unchanged.
+- Return every widget in the canonical shapes above. Do not return rendered widget fields like "label", "value", "delta", "x", "y", "cat", or "metric" at the top level.
 - If the request is unclear or conflicts with the data, return the recipe unchanged with a "reply" that asks one short clarifying question and an empty "changes" array.`;
+}
+
+function toCanonicalWidgets(widgets) {
+  return (widgets || []).map(toCanonicalWidget).filter(Boolean);
+}
+
+function toCanonicalWidget(w) {
+  if (!w || typeof w !== 'object') return null;
+  const span = VALID_SPANS.has(Number(w.span)) ? Number(w.span) : (w.type === 'kpi' ? 3 : 6);
+  if (w.type === 'observations') {
+    return { type: 'observations', span: 12, title: w.title || 'What stood out', observations: w.observations || [] };
+  }
+  if (w.type === 'kpi') {
+    const metric = w.fields?.metric || inferMetricFromLabel(w.label || w.title);
+    if (!metric) return null;
+    return {
+      type: 'kpi',
+      span,
+      title: w.title || w.label || humanize(metric),
+      fields: { metric, ...(w.sparkCol ? { spark: w.sparkCol } : {}) }
+    };
+  }
+  if (w.type === 'line' || w.type === 'bar') {
+    const x = w.fields?.x || w.x;
+    const y = w.fields?.y || w.y;
+    if (!x || !y) return null;
+    return { type: w.type, span, title: w.title || `${humanize(y)} by ${humanize(x)}`, fields: { x, y } };
+  }
+  if (w.type === 'donut' || w.type === 'statlist') {
+    const cat = w.fields?.cat || w.cat;
+    const metric = w.fields?.metric || w.metric;
+    if (!cat || !metric) return null;
+    return { type: w.type, span, title: w.title || `${humanize(metric)} by ${humanize(cat)}`, fields: { cat, metric } };
+  }
+  if (w.type === 'table') {
+    return { type: 'table', span: 12, title: w.title || 'Raw rows', fields: { limit: Number(w.limit || w.fields?.limit) || 10 } };
+  }
+  return null;
+}
+
+function inferMetricFromLabel(label) {
+  if (!label) return null;
+  const normalized = String(label).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const match = (state.schema || []).find(c =>
+    c.type === 'number' &&
+    humanize(c.name).toLowerCase().replace(/[^a-z0-9]/g, '') === normalized
+  );
+  return match?.name || null;
 }
 
 async function chefSubmit(text) {
@@ -1134,8 +1174,11 @@ async function chefSubmit(text) {
       throw new Error('The chef returned no widgets. Try rephrasing.');
     }
 
-    // Validate against current schema (reuse existing validator if available)
     const validated = chefValidateRecipe(parsed, state.schema);
+    const requestedCount = Array.isArray(parsed.widgets) ? parsed.widgets.length : 0;
+    if (requestedCount > 1 && validated.dropped > 0 && validated.widgets.length < Math.ceil(requestedCount * 0.75)) {
+      throw new Error('The chef returned an incomplete recipe. Try that edit again.');
+    }
     if (!validated.widgets.length) {
       throw new Error('No valid widgets in the reply. Try rephrasing.');
     }
@@ -1178,34 +1221,51 @@ async function chefSubmit(text) {
 
 function chefValidateRecipe(parsed, schema) {
   const colNames = new Set(schema.map(c => c.name));
+  const typeByCol = new Map(schema.map(c => [c.name, c.type]));
+  const hasCol = name => colNames.has(name);
+  const isNumberCol = name => hasCol(name) && typeByCol.get(name) === 'number';
+  const isDateCol = name => hasCol(name) && typeByCol.get(name) === 'date';
+  const isGroupCol = name => hasCol(name) && typeByCol.get(name) !== 'number';
   const validSpans = new Set([3, 4, 6, 8, 12]);
   const validTypes = new Set(['kpi','line','bar','donut','statlist','table','observations']);
   const widgets = [];
+  let dropped = 0;
   for (const w of (parsed.widgets || [])) {
-    if (!w || typeof w !== 'object') continue;
-    if (!validTypes.has(w.type)) continue;
+    if (!w || typeof w !== 'object') { dropped++; continue; }
+    if (!validTypes.has(w.type)) { dropped++; continue; }
     let span = Number(w.span);
     if (!validSpans.has(span)) span = w.type === 'kpi' ? 3 : (w.type === 'table' ? 12 : 6);
-    const fields = w.fields || {};
+    const canonical = toCanonicalWidget(w);
+    const fields = canonical?.fields || w.fields || {};
     // Field validation per type
     if (w.type === 'kpi') {
-      if (!colNames.has(fields.metric)) continue;
-      widgets.push({ type:'kpi', span, label: w.title || humanize(fields.metric), title: w.title, metric: computeKPI(fields.metric), sparkCol: colNames.has(fields.spark) ? fields.spark : null });
+      if (!isNumberCol(fields.metric)) { dropped++; continue; }
+      const kpi = computeKPI(fields.metric);
+      widgets.push({
+        type:'kpi',
+        span,
+        label: w.title || canonical?.title || humanize(fields.metric),
+        title: w.title || canonical?.title,
+        value: kpi.value,
+        delta: kpi.delta,
+        sparkCol: isDateCol(fields.spark) ? fields.spark : fields.metric
+      });
     } else if (w.type === 'line' || w.type === 'bar') {
-      if (!colNames.has(fields.x) || !colNames.has(fields.y)) continue;
+      if (!hasCol(fields.x) || !isNumberCol(fields.y)) { dropped++; continue; }
+      if (w.type === 'line' && !isDateCol(fields.x)) { dropped++; continue; }
       widgets.push({ type: w.type, span, title: w.title || humanize(fields.y), x: fields.x, y: fields.y });
     } else if (w.type === 'donut' || w.type === 'statlist') {
-      if (!colNames.has(fields.cat) || !colNames.has(fields.metric)) continue;
+      if (!isGroupCol(fields.cat) || !isNumberCol(fields.metric)) { dropped++; continue; }
       widgets.push({ type: w.type, span, title: w.title || humanize(fields.metric), cat: fields.cat, metric: fields.metric });
     } else if (w.type === 'table') {
       widgets.push({ type:'table', span: 12, title: w.title || 'Raw rows', limit: Number(fields.limit) || 10 });
     } else if (w.type === 'observations') {
       const obs = Array.isArray(w.observations) ? w.observations.filter(o => typeof o === 'string' && o.trim()).slice(0, 3) : [];
-      if (!obs.length) continue;
+      if (!obs.length) { dropped++; continue; }
       widgets.push({ type:'observations', span: 12, title: w.title || 'What we noticed', observations: obs });
     }
   }
-  return { widgets };
+  return { widgets, dropped };
 }
 
 function applyPendingHighlights() {
