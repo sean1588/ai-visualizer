@@ -2059,13 +2059,6 @@ function computeKPIFromValues(vals, aggregate = 'last', colName) {
   return { value: fmt(last), delta, excludedOutlier };
 }
 
-function dropOutliers(vals) {
-  const bounds = iqrBounds(vals);
-  if (!bounds) return vals;
-  const kept = vals.filter(v => v >= bounds.lo && v <= bounds.hi);
-  return kept.length ? kept : vals;
-}
-
 // Compute a KPI value from a column name (mirrors what the planner does)
 function computeKPI(colName, aggregate = 'last') {
   const vals = state.rows.map(r => r[colName]).filter(v => typeof v === 'number');
