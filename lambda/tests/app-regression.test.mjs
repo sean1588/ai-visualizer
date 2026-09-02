@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { test } from "node:test";
@@ -139,6 +140,26 @@ const TOP_N_PLAN = {
   widgets: [
     { type: "kpi", span: 3, title: "Expansion", fields: { metric: "expansion_usd", aggregate: "sum" } },
     { type: "table", span: 12, title: "Top 10 Weeks by Expansion USD", fields: { limit: 10 } },
+  ],
+};
+
+const Q1_REVENUE_CSV = readFileSync(new URL("./fixtures/q1_revenue.csv", import.meta.url), "utf8");
+
+const Q1_REVENUE_PLAN = {
+  title: "SaaS Revenue Retention Dashboard",
+  observations: [
+    "Enterprise finishes at 571.2k MRR and 1.22 NRR on 2026-03-24.",
+    "SMB ends at 1,838 active accounts, 0.95 NRR, and 2.6% logo churn.",
+    "Mid-Market MRR rises to 251.4k while NRR holds above 1.0.",
+  ],
+  widgets: [
+    { type: "kpi", span: 3, title: "CURRENT MRR", fields: { metric: "mrr_usd", aggregate: "last" } },
+    { type: "kpi", span: 3, title: "ACTIVE ACCOUNTS", fields: { metric: "active_accounts", aggregate: "last" } },
+    { type: "kpi", span: 3, title: "NET REVENUE RETENTION", fields: { metric: "nrr", aggregate: "last" } },
+    { type: "kpi", span: 3, title: "LOGO CHURN", fields: { metric: "logo_churn", aggregate: "last" } },
+    { type: "line", span: 6, title: "MRR Trend", fields: { x: "week", y: "mrr_usd" } },
+    { type: "line", span: 6, title: "NRR Trend", fields: { x: "week", y: "nrr" } },
+    { type: "bar", span: 6, title: "MRR by Segment", fields: { x: "segment", y: "mrr_usd" } },
   ],
 };
 
@@ -653,6 +674,76 @@ test("one-level nested JSON flattens and never prints [object Object]", async ()
     assert.doesNotMatch(text, /\[object Object\]/);
     assert.match(text, /octocat/);
   }, { allowConsole: /AI response did not validate, falling back/ });
+});
+
+test("one row per date×segment is a weekly series, not 36 raw points", async () => {
+  await withPage(async page => {
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, Q1_REVENUE_PLAN);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#paste").fill(Q1_REVENUE_CSV);
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    const info = await page.evaluate(() => {
+      const kpis = [...document.querySelectorAll(".w-kpi")].map(el => ({
+        label: el.querySelector(".label")?.textContent.trim(),
+        value: el.querySelector(".value")?.textContent.trim(),
+        delta: el.querySelector(".delta")?.textContent.trim() || "",
+      }));
+      const charts = [...document.querySelectorAll(".w-chart")].map(el => ({
+        title: el.querySelector("h3")?.textContent.trim(),
+        meta: el.querySelector(".meta")?.textContent.trim(),
+      }));
+      const weekCol = state.schema.find(c => c.name === "week");
+      const mrrSeries = (typeof seriesBy === "function")
+        ? seriesBy(state.rows, "week", "mrr_usd")
+        : state.rows.map(r => ({ x: r.week, y: r.mrr_usd }));
+      const nrrSeries = (typeof seriesBy === "function")
+        ? seriesBy(state.rows, "week", "nrr")
+        : state.rows.map(r => ({ x: r.week, y: r.nrr }));
+      const mrrKpi = state.recipe.widgets.find(w => w.type === "kpi" && /mrr/i.test(w.label || w.title || ""));
+      return {
+        rowCount: state.rows.length,
+        weekType: weekCol?.type,
+        uniqueWeeks: new Set(state.rows.map(r => r.week)).size,
+        kpis,
+        charts,
+        mrrSeriesLen: mrrSeries.length,
+        nrrSeriesLen: nrrSeries.length,
+        lastMrr: mrrSeries[mrrSeries.length - 1]?.y,
+        prevMrr: mrrSeries[mrrSeries.length - 2]?.y,
+        lastNrr: nrrSeries[nrrSeries.length - 1]?.y,
+        mrrKpiValue: mrrKpi?.value,
+        mrrKpiDelta: mrrKpi?.delta,
+      };
+    });
+
+    assert.equal(info.rowCount, 36);
+    assert.equal(info.weekType, "date");
+    assert.equal(info.uniqueWeeks, 12);
+    assert.equal(info.mrrSeriesLen, 12, "MRR trend must collapse to one point per week");
+    assert.equal(info.nrrSeriesLen, 12, "NRR trend must collapse to one point per week");
+    assert.equal(info.lastMrr, 905700, "last-week company MRR is Enterprise+Mid-Market+SMB");
+    assert.equal(info.prevMrr, 894728);
+    assert.ok(Math.abs(info.lastNrr - (1.22 + 1.07 + 0.95) / 3) < 1e-9);
+
+    const currentMrr = info.kpis.find(k => /current mrr/i.test(k.label));
+    assert.ok(currentMrr, "CURRENT MRR kpi is present");
+    assert.equal(currentMrr.value, "905.7k");
+    assert.doesNotMatch(currentMrr.value, /83\.1k/);
+    assert.doesNotMatch(currentMrr.delta, /66\.9%/);
+    const expectedDelta = ((905700 - 894728) / 894728) * 100;
+    assert.ok(Math.abs(info.mrrKpiDelta - expectedDelta) < 0.05, `week-over-week delta, got ${info.mrrKpiDelta}`);
+
+    const mrrTrend = info.charts.find(c => /mrr trend/i.test(c.title));
+    const nrrTrend = info.charts.find(c => /nrr trend/i.test(c.title));
+    const bySegment = info.charts.find(c => /mrr by segment/i.test(c.title));
+    assert.match(mrrTrend.meta, /line · 12 pts/i);
+    assert.match(nrrTrend.meta, /line · 12 pts/i);
+    assert.doesNotMatch(mrrTrend.meta, /36/);
+    assert.doesNotMatch(nrrTrend.meta, /36/);
+    assert.match(bySegment.meta, /bar · 3 groups/i);
+  });
 });
 
 test("compact numbers never print 1000B for just-under-a-trillion values", async () => {
