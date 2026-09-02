@@ -503,8 +503,7 @@ function parseAndValidateRecipe(raw, schema, rows) {
     // KPI value/delta — compute from data
     if (w.type === 'kpi') {
       const aggregate = normalizeKpiAggregate(fields.aggregate, w.title);
-      const vals = rows.map(r => r[fields.metric]).filter(v => typeof v === 'number');
-      const computed = computeKPIFromValues(vals, aggregate, fields.metric);
+      const computed = computeKPIFromValues(metricValues(fields.metric, rows, schema), aggregate, fields.metric);
       validated.push({
         type: 'kpi', span,
         label: w.title || humanize(fields.metric),
@@ -580,7 +579,7 @@ function deterministicRecipe(rows, schema) {
 
   const kpiCols = numCols.slice(0, 4);
   kpiCols.forEach(col => {
-    const vals = rows.map(r => r[col.name]).filter(v => typeof v === 'number');
+    const vals = metricValues(col.name, rows, schema);
     const last = vals[vals.length-1] ?? 0;
     const prev = vals[vals.length-2] ?? last;
     const delta = prev ? ((last - prev) / Math.abs(prev)) * 100 : 0;
@@ -623,28 +622,76 @@ function looksLikeLevelMetric(name) {
   return /(mrr|arr|nrr|crr|balance|accounts|headcount|price|rate|ratio|stock|aum)/i.test(String(name || ''));
 }
 
-function chooseGroupMode(rows, catKey, metricKey) {
+function looksLikeRateMetric(name) {
+  return /(pct|percent|percentage|churn|nrr|crr|rate|ratio)/i.test(String(name || ''));
+}
+
+function groupKeyIsTime(rows, key) {
+  if (columnType(key) === 'date') return true;
+  const vals = (rows || []).map(r => r[key]).filter(v => v != null && v !== '');
+  return vals.length > 0 && vals.every(looksLikeDate);
+}
+
+function keyCounts(rows, key) {
   const seen = new Map();
-  for (const r of rows) {
-    const k = String(r[catKey] ?? '—');
+  for (const r of rows || []) {
+    const k = String(r[key] ?? '—');
     seen.set(k, (seen.get(k) || 0) + 1);
   }
-  const repeats = [...seen.values()].some(n => n > 1);
+  return seen;
+}
+
+function chooseGroupMode(rows, catKey, metricKey) {
+  const repeats = [...keyCounts(rows, catKey).values()].some(n => n > 1);
+  if (repeats && groupKeyIsTime(rows, catKey)) {
+    return looksLikeRateMetric(metricKey) ? 'average' : 'sum';
+  }
   return (repeats && looksLikeLevelMetric(metricKey)) ? 'last' : 'sum';
+}
+
+function groupValues(rows, catKey, metricKey, mode) {
+  const resolved = mode || chooseGroupMode(rows, catKey, metricKey);
+  const map = new Map();
+  const counts = new Map();
+  for (const r of rows || []) {
+    const k = String(r[catKey] ?? '—');
+    const v = typeof r[metricKey] === 'number' ? r[metricKey] : 0;
+    if (resolved === 'last') map.set(k, v);
+    else {
+      map.set(k, (map.get(k) ?? 0) + v);
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+  }
+  if (resolved === 'average') {
+    for (const [k, sum] of map) map.set(k, sum / (counts.get(k) || 1));
+  }
+  return map;
 }
 
 // aggregate rows by category, summing a metric (or taking last for snapshot levels)
 function aggregateBy(rows, catKey, metricKey, mode) {
-  const resolved = mode || chooseGroupMode(rows, catKey, metricKey);
-  const map = new Map();
-  for (const r of rows) {
-    const k = String(r[catKey] ?? '—');
-    const v = typeof r[metricKey] === 'number' ? r[metricKey] : 0;
-    if (resolved === 'last') map.set(k, v);
-    else map.set(k, (map.get(k) ?? 0) + v);
-  }
-  return [...map.entries()].map(([k, v]) => ({ key: k, value: v }))
+  return [...groupValues(rows, catKey, metricKey, mode).entries()]
+    .map(([k, v]) => ({ key: k, value: v }))
     .sort((a, b) => b.value - a.value);
+}
+
+function seriesBy(rows, xKey, yKey) {
+  const repeats = [...keyCounts(rows, xKey).values()].some(n => n > 1);
+  if (!repeats) {
+    return (rows || []).map(r => ({ x: r[xKey], y: r[yKey] })).filter(p => typeof p.y === 'number');
+  }
+  return [...groupValues(rows, xKey, yKey).entries()].map(([x, y]) => ({ x, y }));
+}
+
+function findTimeColumn(schema = state.schema, rows = state.rows) {
+  const cols = schema || [];
+  return cols.find(c => c.type === 'date') || cols.find(c => groupKeyIsTime(rows, c.name)) || null;
+}
+
+function metricValues(colName, rows = state.rows, schema = state.schema) {
+  const timeCol = findTimeColumn(schema, rows);
+  if (timeCol) return seriesBy(rows, timeCol.name, colName).map(p => p.y).filter(v => typeof v === 'number');
+  return (rows || []).map(r => r[colName]).filter(v => typeof v === 'number');
 }
 
 function countBy(rows, catKey) {
@@ -834,7 +881,7 @@ function widgetKPI(w) {
     : '';
   let spark = '';
   if (w.sparkCol) {
-    const vals = state.rows.map(r => r[w.sparkCol]).filter(v => typeof v === 'number');
+    const vals = metricValues(w.sparkCol);
     if (vals.length > 1) spark = `<div class="kpi-spark">${sparklineSVG(vals)}</div>`;
   }
   return `<div class="w w-kpi" style="grid-column:span ${w.span};">
@@ -941,7 +988,7 @@ function widgetCountBar(w) {
 }
 
 function widgetLine(w) {
-  const data = state.rows.map(r => ({ x: r[w.x], y: r[w.y] })).filter(p => typeof p.y === 'number');
+  const data = seriesBy(state.rows, w.x, w.y);
   if (!data.length) return '';
   const W = 700, H = 200, pl = 44, pr = 16, pt = 18, pb = 28;
   const ys = data.map(d => d.y);
@@ -979,7 +1026,7 @@ function widgetBar(w) {
   const shouldAggregate = xType === 'category' || xType === 'string';
   const data = shouldAggregate
     ? aggregateBy(state.rows, w.x, w.y).slice(0, 12).map(d => ({ x: d.key, y: d.value }))
-    : state.rows.map(r => ({ x: r[w.x], y: r[w.y] })).filter(p => typeof p.y === 'number');
+    : seriesBy(state.rows, w.x, w.y);
   if (!data.length) return '';
   const W = 400, H = 200, pl = 44, pr = 12, pt = 18, pb = 28;
   const ys = data.map(d => d.y);
@@ -2061,8 +2108,7 @@ function computeKPIFromValues(vals, aggregate = 'last', colName) {
 
 // Compute a KPI value from a column name (mirrors what the planner does)
 function computeKPI(colName, aggregate = 'last') {
-  const vals = state.rows.map(r => r[colName]).filter(v => typeof v === 'number');
-  return computeKPIFromValues(vals, aggregate, colName);
+  return computeKPIFromValues(metricValues(colName), aggregate, colName);
 }
 function formatNum(n, colName) {
   return fmtCompact(n, colName);
@@ -2123,6 +2169,8 @@ window.__mise = {
   buildRecipePayload,
   tableTransformLabel,
   computeKPIFromValues,
+  seriesBy,
+  metricValues,
   hasHttpSource,
   syncChrome,
   get state() { return state; }

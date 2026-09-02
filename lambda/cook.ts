@@ -427,7 +427,7 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
   }
 
   const baseURL = process.env.LLM_BASE_URL || "https://openrouter.ai/api/v1";
-  const model = process.env.LLM_MODEL || "moonshotai/kimi-k2.6";
+  const model = process.env.LLM_MODEL || "openai/gpt-5.6-luna";
   const apiKey = process.env.OPENROUTER_API_KEY || process.env.LLM_API_KEY;
   if (!apiKey) {
     logEvent({ event: "error", reason: "missing_api_key", status: 500, ms: Date.now() - t0 });
