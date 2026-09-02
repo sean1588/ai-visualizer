@@ -1,0 +1,24 @@
+:root {
+  --bg: #f5f2ec;
+  --fg: #1f1c16;
+  --fg-mute: #6e6759;
+  --rule: #1f1c16;
+  --rule-soft: #d9d3c4;
+  --accent: #8a3324;
+  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 16px; line-height: 1.55; }
+.top { display: flex; justify-content: space-between; align-items: baseline; padding: 20px 32px; border-bottom: 1.5px solid var(--rule); font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-mute); }
+.mark { font-family: var(--font-display); font-style: italic; font-weight: 600; font-size: 22px; color: var(--fg); text-decoration: none; text-transform: none; letter-spacing: -0.02em; }
+.mark::after { content: ""; }
+main { max-width: 640px; padding: 48px 32px 80px; }
+h1 { font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 36px; letter-spacing: -0.02em; line-height: 1.15; margin: 0 0 22px; }
+p, li { color: var(--fg); }
+a { color: var(--accent); }
+code { font-family: var(--font-mono); font-size: 13px; }
+ol, ul { padding-left: 1.2em; }
+li { margin: 0 0 10px; }

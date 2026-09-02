@@ -147,6 +147,21 @@
   .dash-head { padding: 22px 32px 16px; border-bottom: 1px solid var(--rule-soft); background: var(--bg); }
   .dash-head h1 { font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 36px; letter-spacing: -0.02em; margin: 4px 0 6px; }
   .dash-head-meta { font-family: var(--font-mono); font-size: 11px; color: var(--fg-mute); letter-spacing: 0.04em; }
+  .dash-health { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-mute); letter-spacing: 0.04em; margin-top: 6px; }
+  .transform-chip { display: inline-flex; align-items: center; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--rule-soft); background: var(--bg); padding: 3px 7px; border-radius: 999px; }
+  .table-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: -4px 0 12px; }
+  .table-export-btn { padding: 4px 8px; font-size: 10px; }
+  .table-scroll { overflow: auto; max-width: 100%; max-height: 420px; }
+  .w-table.is-fallback .table-scroll { max-height: 280px; }
+  .w-table th, .w-table td { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .obj-chip { display: inline-block; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; color: var(--fg-mute); border: 1px dashed var(--rule); padding: 1px 6px; cursor: help; }
+  .pending-recipe { margin-top: 12px; font-family: var(--font-mono); font-size: 11px; color: var(--accent-2); letter-spacing: 0.04em; }
+  .site-foot { margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--rule-soft); display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-mute); }
+  .site-foot a { color: var(--fg); text-decoration: none; }
+  .site-foot a:hover { color: var(--accent); }
+  .site-foot nav { display: flex; gap: 14px; flex-wrap: wrap; }
+  .retry-ai-btn { margin-left: auto; }
+  .w-banner { flex-wrap: wrap; }
   .dash-grid { padding: 18px 32px 60px; display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
   .w { background: var(--bg-elev); border: 1px solid var(--rule-soft); border-radius: 8px; padding: 22px; box-shadow: 0 1px 0 rgba(31,28,22,0.03); display: flex; flex-direction: column; min-height: 120px; }
   .w-12 { grid-column: span 12; }
@@ -405,10 +420,10 @@
           <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="#1f1c16" stroke-width="1.5"><path d="M11 14V4M11 4l-4 4M11 4l4 4M3 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
         </div>
         <h3>Drop a file here</h3>
-        <p>CSV or JSON · or paste below</p>
+        <p>CSV, JSON, or a Mise recipe · or paste below</p>
         <div class="drop-cta-row">
           <button id="browse-btn" type="button" class="btn btn-ghost">Choose file…</button>
-          <input id="file-input" type="file" accept=".csv,.json,.txt,application/json,text/csv,text/plain" style="display:none;" />
+          <input id="file-input" type="file" accept=".csv,.json,.txt,.recipe.json,application/json,text/csv,text/plain" style="display:none;" />
           <span class="drop-cta-meta" id="file-name">no file selected</span>
         </div>
         <div class="or"><span>or fetch</span></div>
@@ -433,6 +448,7 @@
           <button id="render-btn" class="btn btn-primary btn-lg">Render dashboard →</button>
         </div>
         <div class="drop-meta">Schema inferred locally · sample rows sent once for inference · never stored</div>
+        <div id="pending-recipe" class="pending-recipe" hidden></div>
         <div id="err" class="err" style="display:none;"></div>
       </div>
 
@@ -452,6 +468,15 @@
           <span class="sample-chip" data-sample="stripe">Stripe payouts</span>
         </div>
       </div>
+      <footer class="site-foot">
+        <span>Mise · browser-local dashboards</span>
+        <nav>
+          <a href="docs/quickstart.html">Quickstart</a>
+          <a href="docs/examples.html">Examples</a>
+          <a href="docs/about.html">About</a>
+          <a href="docs/contact.html">Contact</a>
+        </nav>
+      </footer>
     </div>
   </div>
 </section>
@@ -491,6 +516,7 @@
     <div class="eyebrow eyebrow-accent">— Dashboard —</div>
     <h1 id="dash-title">Untitled dashboard</h1>
     <div id="dash-meta" class="dash-head-meta">— rows · — cols · rendered locally</div>
+    <div id="dash-health" class="dash-health" hidden></div>
   </div>
   <div id="dash-grid" class="dash-grid"></div>
 </section>
@@ -518,6 +544,7 @@
         <button class="chef-suggestion" data-prompt="Hide the observations widget">Hide the observations widget</button>
         <button class="chef-suggestion" data-prompt="Make the first KPI the hero metric — full width, larger">Promote the first KPI to a hero — full width</button>
         <button class="chef-suggestion" data-prompt="Sort the table by date, descending, and limit to 20 rows">Sort the table by date desc, top 20</button>
+        <button class="chef-suggestion" data-prompt="Show a top 10 table sorted by the primary numeric metric, descending">Top 10 by primary metric</button>
       </div>
     </div>
     <div id="chef-msgs" class="chef-msgs"></div>

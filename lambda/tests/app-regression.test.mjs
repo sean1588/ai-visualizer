@@ -109,6 +109,44 @@ const TABLE_ONLY_PLAN = {
   ],
 };
 
+const QUOTED_COMMA_CSV = [
+  "Date,Product,Qty,Amount,Rep,Note",
+  '2026-08-03,"Widget, C",3,400.00,Ava,"quoted comma"',
+  "2026-08-04,Gadget,1,50.00,Bea,plain",
+  "",
+  "2026-08-05,Widget,2,80.00,Ava,third",
+].join("\n");
+
+const MESSY_SALES_CSV = "\uFEFFDate,Product,Qty,Amount,Rep,Note\n" + QUOTED_COMMA_CSV.split("\n").slice(1).join("\n");
+
+const TOP_N_ROWS = [
+  { week: "2026-W01", expansion_usd: 120 },
+  { week: "2026-W02", expansion_usd: 40 },
+  { week: "2026-W03", expansion_usd: 880 },
+  { week: "2026-W04", expansion_usd: 15 },
+  { week: "2026-W05", expansion_usd: 410 },
+  { week: "2026-W06", expansion_usd: 90 },
+  { week: "2026-W07", expansion_usd: 700 },
+  { week: "2026-W08", expansion_usd: 55 },
+  { week: "2026-W09", expansion_usd: 300 },
+  { week: "2026-W10", expansion_usd: 10 },
+  { week: "2026-W11", expansion_usd: 250 },
+  { week: "2026-W12", expansion_usd: 5 },
+];
+
+const TOP_N_PLAN = {
+  title: "Expansion",
+  widgets: [
+    { type: "kpi", span: 3, title: "Expansion", fields: { metric: "expansion_usd", aggregate: "sum" } },
+    { type: "table", span: 12, title: "Top 10 Weeks by Expansion USD", fields: { limit: 10 } },
+  ],
+};
+
+const NESTED_COMMITS = [
+  { sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", html_url: "https://github.com/sean1588/ai-visualizer/commit/aaaaaaaa", author: { login: "octocat", id: 1 }, commit: { message: "fix parser" } },
+  { sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", html_url: "https://github.com/sean1588/ai-visualizer/commit/bbbbbbbb", author: { login: "hubot", id: 2 }, commit: { message: "add chef" } },
+];
+
 let server;
 
 test.before(async () => {
@@ -393,6 +431,242 @@ test("HTTP source dashboards save a refreshable URL and refresh without re-plann
     await page.getByText("Segment Revenue").first().click();
     await page.waitForSelector("#chef-fab.is-visible");
     assert.equal(await page.locator("#refresh-btn").isEnabled(), true);
+  });
+});
+
+test("applying an HTTP recipe to pasted CSV does not advertise refresh", async () => {
+  await withPage(async page => {
+    let fetchCalls = 0;
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, AGGREGATE_PLAN);
+    await page.route("**/api/fetch-data", async route => {
+      fetchCalls++;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          text: JSON.stringify(SEGMENT_REVENUE),
+          contentType: "application/json",
+          finalUrl: "https://example.test/revenue.json",
+        }),
+      });
+    });
+
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#paste").fill(JSON.stringify(SEGMENT_REVENUE, null, 2));
+    await page.locator("#file-input").setInputFiles({
+      name: "segment.recipe.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify({
+        title: "Segment Revenue",
+        widgets: AGGREGATE_PLAN.widgets,
+        dataSource: { type: "http", url: "https://example.test/revenue.json" },
+        generator: "Mise v0.6",
+      })),
+    });
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    const chrome = await page.evaluate(() => ({
+      pill: document.getElementById("status-pill").innerText,
+      refreshDisabled: document.getElementById("refresh-btn").disabled,
+      hasHttp: hasHttpSource(),
+      liveType: state.dataSource?.type || null,
+    }));
+
+    assert.doesNotMatch(chrome.pill, /HTTP\s*·\s*refreshable/i);
+    assert.equal(chrome.refreshDisabled, true);
+    assert.equal(chrome.hasHttp, false);
+    assert.equal(chrome.liveType, null);
+
+    await page.locator("#refresh-btn").click({ force: true });
+    await page.waitForTimeout(80);
+    assert.equal(fetchCalls, 0);
+  });
+});
+
+test("quoted-comma CSV keeps fields intact and aggregates by the real rep", async () => {
+  await withPage(async page => {
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    const result = await page.evaluate(text => {
+      const incoming = incomingKind(text);
+      const rows = incoming.rows;
+      const byRep = {};
+      for (const row of rows) {
+        byRep[row.Rep] = (byRep[row.Rep] || 0) + row.Amount;
+      }
+      return {
+        product: rows[0].Product,
+        amount: rows[0].Amount,
+        rep: rows[0].Rep,
+        note: rows[0].Note,
+        dropped: incoming.health.rowsDropped,
+        parsed: incoming.health.rowsParsed,
+        groups: Object.keys(byRep).sort(),
+        ava: byRep.Ava,
+      };
+    }, MESSY_SALES_CSV);
+
+    assert.equal(result.product, "Widget, C");
+    assert.equal(result.amount, 400);
+    assert.equal(result.rep, "Ava");
+    assert.equal(result.note, "quoted comma");
+    assert.equal(result.parsed, 3);
+    assert.equal(result.dropped, 1);
+    assert.deepEqual(result.groups, ["Ava", "Bea"]);
+    assert.equal(result.ava, 480);
+  });
+});
+
+test("header-only CSV, empty CSV, and a single JSON object are rejected", async () => {
+  await withPage(async page => {
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    const messages = await page.evaluate(() => {
+      const tryParse = text => {
+        try { incomingKind(text); return "ok"; }
+        catch (e) { return e.message; }
+      };
+      return {
+        empty: tryParse(""),
+        headers: tryParse("Date,Amount\n"),
+        object: tryParse(JSON.stringify({ hello: "world", nested: { a: 1 } })),
+      };
+    });
+    assert.match(messages.empty, /Nothing to parse/i);
+    assert.match(messages.headers, /header row and one data row/i);
+    assert.match(messages.object, /single JSON object/i);
+  });
+});
+
+test("top-N table is sorted by the named metric and shows a transform chip", async () => {
+  await withPage(async page => {
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, TOP_N_PLAN);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#paste").fill(JSON.stringify(TOP_N_ROWS, null, 2));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    const info = await page.evaluate(() => {
+      const table = state.recipe.widgets.find(w => w.type === "table");
+      const shown = sortedTableRows(table).map(r => r.expansion_usd);
+      return {
+        sort: table.sort,
+        order: table.order,
+        limit: table.limit,
+        shown,
+        chip: tableTransformLabel(table),
+      };
+    });
+
+    assert.equal(info.sort, "expansion_usd");
+    assert.equal(info.order, "desc");
+    assert.equal(info.limit, 10);
+    assert.deepEqual(info.shown, [...info.shown].sort((a, b) => b - a));
+    assert.equal(info.shown[0], 880);
+    assert.equal(info.shown.length, 10);
+    assert.match(info.chip, /sort: expansion_usd desc/i);
+    assert.match(await page.locator("body").innerText(), /sort: expansion_usd desc/i);
+  });
+});
+
+test("recipe download writes a file and re-imports against new data without re-planning", async () => {
+  await withPage(async page => {
+    let cookCalls = 0;
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, AGGREGATE_PLAN, () => { cookCalls++; });
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#paste").fill(JSON.stringify(SEGMENT_REVENUE, null, 2));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+    assert.equal(cookCalls, 1);
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.locator("#export-recipe-btn").click();
+    const download = await downloadPromise;
+    assert.match(download.suggestedFilename(), /\.recipe\.json$/);
+    assert.match(download.suggestedFilename(), /\d{4}-/);
+    const recipePath = await download.path();
+    assert.ok(recipePath);
+
+    await page.evaluate(() => window.reset());
+    await page.locator("#paste").fill(JSON.stringify(
+      [...SEGMENT_REVENUE, { segment: "enterprise", revenue: 30000, channel: "partner" }],
+      null,
+      2
+    ));
+    await page.locator("#file-input").setInputFiles(recipePath);
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    const text = await page.locator("body").innerText();
+    assert.match(text, /150k/);
+    assert.equal(cookCalls, 1);
+  });
+});
+
+test("PNG exports use unique timestamps and surface encode failures", async () => {
+  await withPage(async page => {
+    await mockInference(page);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.getByText("SAAS METRICS").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    const firstPromise = page.waitForEvent("download");
+    await page.locator("#export-btn").click();
+    const first = await firstPromise;
+
+    const secondPromise = page.waitForEvent("download");
+    await page.locator("#export-btn").click();
+    const second = await secondPromise;
+
+    assert.match(first.suggestedFilename(), /\.png$/);
+    assert.match(first.suggestedFilename(), /\d{4}-/);
+    assert.notEqual(first.suggestedFilename(), second.suggestedFilename());
+
+    await page.evaluate(() => {
+      window.html2canvas = async () => {
+        const canvas = document.createElement("canvas");
+        canvas.toBlob = cb => cb(null);
+        return canvas;
+      };
+    });
+    await page.locator("#export-btn").click();
+    await page.waitForFunction(() => document.body.innerText.toLowerCase().includes("failed"));
+  }, { allowConsole: /PNG export failed|PNG encode failed/ });
+});
+
+test("one-level nested JSON flattens and never prints [object Object]", async () => {
+  await withPage(async page => {
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, {
+      title: "Commits",
+      widgets: [
+        { type: "kpi", span: 3, title: "Authors", fields: { metric: "author.id", aggregate: "count" } },
+        { type: "table", span: 12, title: "Rows", fields: { limit: 10 } },
+      ],
+    });
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    const parsed = await page.evaluate(rows => incomingKind(JSON.stringify(rows)).rows, NESTED_COMMITS);
+    assert.equal(parsed[0]["author.login"], "octocat");
+    assert.equal(parsed[0]["commit.message"], "fix parser");
+    assert.ok(!JSON.stringify(parsed).includes("[object Object]"));
+
+    await page.locator("#paste").fill(JSON.stringify(NESTED_COMMITS, null, 2));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+    const text = await page.locator("body").innerText();
+    assert.doesNotMatch(text, /\[object Object\]/);
+    assert.match(text, /octocat/);
+  }, { allowConsole: /AI response did not validate, falling back/ });
+});
+
+test("compact numbers never print 1000B for just-under-a-trillion values", async () => {
+  await withPage(async page => {
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    const formatted = await page.evaluate(() => ({
+      justUnderT: fmtCompact(999999999999),
+      trillion: fmtCompact(1e12),
+      billion: fmtCompact(1.5e9),
+    }));
+    assert.doesNotMatch(formatted.justUnderT, /1000\s*[Bb]/);
+    assert.match(formatted.justUnderT, /T|999/);
+    assert.match(formatted.trillion, /T/);
+    assert.equal(formatted.billion, "1.5B");
   });
 });
 
