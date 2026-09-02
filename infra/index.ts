@@ -17,7 +17,7 @@ import * as syncedFolder from "@pulumi/synced-folder";
 const cfg = new pulumi.Config();
 const domain = cfg.require("domain");                         // app.mise.seanholung.com
 const rootZone = cfg.require("rootZone");                     // seanholung.com
-const llmModel = cfg.get("llmModel") || "moonshotai/kimi-k2.6";
+const llmModel = cfg.get("llmModel") || "openai/gpt-5.6-luna";
 const llmBaseUrl = cfg.get("llmBaseUrl") || "https://openrouter.ai/api/v1";
 
 // API key is injected from the GitHub Actions secret OPENROUTER_API_KEY at deploy time.
