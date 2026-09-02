@@ -434,6 +434,55 @@ test("HTTP source dashboards save a refreshable URL and refresh without re-plann
   });
 });
 
+test("applying an HTTP recipe to pasted CSV does not advertise refresh", async () => {
+  await withPage(async page => {
+    let fetchCalls = 0;
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, AGGREGATE_PLAN);
+    await page.route("**/api/fetch-data", async route => {
+      fetchCalls++;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          text: JSON.stringify(SEGMENT_REVENUE),
+          contentType: "application/json",
+          finalUrl: "https://example.test/revenue.json",
+        }),
+      });
+    });
+
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#paste").fill(JSON.stringify(SEGMENT_REVENUE, null, 2));
+    await page.locator("#file-input").setInputFiles({
+      name: "segment.recipe.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify({
+        title: "Segment Revenue",
+        widgets: AGGREGATE_PLAN.widgets,
+        dataSource: { type: "http", url: "https://example.test/revenue.json" },
+        generator: "Mise v0.6",
+      })),
+    });
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    const chrome = await page.evaluate(() => ({
+      pill: document.getElementById("status-pill").innerText,
+      refreshDisabled: document.getElementById("refresh-btn").disabled,
+      hasHttp: hasHttpSource(),
+      liveType: state.dataSource?.type || null,
+    }));
+
+    assert.doesNotMatch(chrome.pill, /HTTP\s*·\s*refreshable/i);
+    assert.equal(chrome.refreshDisabled, true);
+    assert.equal(chrome.hasHttp, false);
+    assert.equal(chrome.liveType, null);
+
+    await page.locator("#refresh-btn").click({ force: true });
+    await page.waitForTimeout(80);
+    assert.equal(fetchCalls, 0);
+  });
+});
+
 test("quoted-comma CSV keeps fields intact and aggregates by the real rep", async () => {
   await withPage(async page => {
     await page.goto(BASE_URL, { waitUntil: "networkidle" });

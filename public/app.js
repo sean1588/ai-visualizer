@@ -173,8 +173,8 @@ function parseCSVRecords(text) {
     field += c; i++;
   }
   pushField();
+  // A leftover empty field after a terminating newline is EOF, not a dropped row.
   if (record.length && record.some(c => String(c).trim() !== '')) pushRecord();
-  else if (record.length) droppedBlank++;
 
   if (quoted) throw new Error("CSV has an unclosed quote — check the last quoted field.");
   return { records, droppedBlank };
@@ -709,7 +709,7 @@ function chromePillLabel() {
 }
 
 function hasHttpSource() {
-  const src = state.dataSource || state.recipe?.dataSource;
+  const src = state.dataSource;
   return !!(src && src.type === 'http' && src.url);
 }
 
@@ -1140,7 +1140,7 @@ function restoreRecent(id) {
   state.recipe = entry.recipe;
   state.title = entry.title;
   state.id = entry.id;
-  state.dataSource = entry.dataSource || entry.recipe?.dataSource || null;
+  state.dataSource = entry.dataSource || null;
   state.parseHealth = entry.parseHealth || buildParseHealth(entry.rows, entry.schema, { rowsParsed: entry.rows?.length || 0, rowsDropped: 0 });
   renderDashboard();
   showStage('dash');
@@ -1152,7 +1152,7 @@ function persistCurrent() {
   saveRecent({
     id, title: state.recipe.title,
     rows: state.rows, schema: state.schema, recipe: state.recipe,
-    dataSource: state.dataSource || state.recipe.dataSource || null,
+    dataSource: state.dataSource || null,
     parseHealth: state.parseHealth || null,
     savedAt: Date.now(),
     cols: state.schema.length
@@ -1391,7 +1391,7 @@ function applyRecipeToRows(recipe, schema) {
     title: recipe?.title || state.title || 'Untitled dashboard',
     widgets,
     fallback: false,
-    dataSource: recipe?.dataSource || state.dataSource || null
+    dataSource: state.dataSource || null
   };
 }
 
@@ -1488,7 +1488,7 @@ function rehydrateRecipeForCurrentRows(recipe, schema) {
 }
 
 async function refreshCurrentDashboard() {
-  if (state.dataSource?.type !== 'http' || !state.recipe) return;
+  if (!hasHttpSource() || !state.recipe) return;
   const source = state.dataSource;
   try {
     flashStatus('Refreshing data…');
