@@ -38,7 +38,12 @@ const state = {
   recipe: null,
   id: null,
   title: "Untitled dashboard",
-  dataSource: null
+  dataSource: null,
+  sourceText: null,
+  notes: '',
+  parseHealth: null,
+  pendingRecipe: null,
+  excludeOutliers: true
 };
 let statusFlashTimer = null;
 
@@ -58,14 +63,14 @@ function showStage(name) {
 function reset() {
   resetChefSession();
   state.rows = null; state.schema = null; state.recipe = null; state.id = null; state.dataSource = null;
+  state.sourceText = null; state.notes = ''; state.parseHealth = null; state.pendingRecipe = null;
   document.getElementById('paste').value = '';
   document.getElementById('http-url').value = '';
   document.getElementById('file-name').textContent = 'no file selected';
   document.getElementById('file-input').value = '';
   document.getElementById('err').style.display = 'none';
-  document.getElementById('refresh-btn').disabled = true;
-  document.getElementById('export-btn').disabled = true;
-  document.getElementById('export-recipe-btn').disabled = true;
+  renderPendingRecipe();
+  syncChrome();
   document.getElementById('crumb').textContent = 'New dashboard';
   document.getElementById('status-pill').innerHTML = '<span class="pill-dot"></span>Local · not exported';
   renderRecents();
@@ -73,94 +78,275 @@ function reset() {
 }
 
 // ─── parsing ────────────────────────────────────────────────────────
-function parseInput(text) {
-  text = text.trim();
-  if (!text) throw new Error("Nothing to parse — paste JSON or CSV.");
+function isRecipePayload(obj) {
+  return !!(obj && typeof obj === 'object' && !Array.isArray(obj) && Array.isArray(obj.widgets));
+}
 
-  // Detect JSON by shape: starts with { or [
-  const looksJSON = text[0] === '{' || text[0] === '[';
-  if (looksJSON) {
-    let j;
-    try { j = JSON.parse(text); }
-    catch (e) { throw new Error("That looks like JSON but didn't parse: " + e.message); }
-    if (Array.isArray(j)) {
-      if (!j.length) throw new Error("JSON array is empty — need at least one row.");
-      if (typeof j[0] !== 'object' || j[0] === null) throw new Error("JSON array must contain row objects, not primitives.");
-      return j;
-    }
-    if (typeof j === 'object' && j !== null) {
-      // single object — try to find an array of rows inside
-      for (const k of Object.keys(j)) {
-        if (Array.isArray(j[k]) && j[k].length && typeof j[k][0] === 'object') return j[k];
+function looksLikeDate(v) {
+  const s = String(v).trim();
+  return /^\d{4}-\d{2}(-\d{2})?/.test(s) || /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(s);
+}
+
+function coerceCell(v) {
+  if (v === undefined || v === null) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'object') return v;
+  const s = String(v).trim();
+  if (s === '') return null;
+  const n = Number(s);
+  return (!isNaN(n) && s !== '') ? n : s;
+}
+
+function flattenOneLevel(row) {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+  const out = {};
+  for (const [key, val] of Object.entries(row)) {
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      for (const [k2, v2] of Object.entries(val)) {
+        out[`${key}.${k2}`] = v2;
       }
-      return [j];
+    } else {
+      out[key] = val;
     }
-    throw new Error("JSON parsed but isn't a row array or object.");
   }
+  return out;
+}
 
-  // CSV path
-  const lines = text.split(/\r?\n/).filter(l => l.trim());
-  if (lines.length < 2) throw new Error("Need at least a header row and one data row.");
-  const headers = splitCSV(lines[0]);
-  return lines.slice(1).map(line => {
-    const cells = splitCSV(line);
+function flattenRows(rows) {
+  return rows.map(r => {
+    const flat = flattenOneLevel(r);
     const o = {};
-    headers.forEach((h, i) => {
-      const v = cells[i];
-      if (v === undefined || v === '') { o[h] = null; return; }
-      const n = Number(v);
-      o[h] = (!isNaN(n) && v.trim() !== '') ? n : v;
-    });
+    for (const [k, v] of Object.entries(flat)) o[k] = coerceCell(v);
     return o;
   });
 }
-function splitCSV(line) {
-  const out = []; let cur = ''; let q = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (q) {
-      if (c === '"' && line[i+1] === '"') { cur += '"'; i++; }
-      else if (c === '"') q = false;
-      else cur += c;
-    } else {
-      if (c === '"') q = true;
-      else if (c === ',') { out.push(cur); cur = ''; }
-      else cur += c;
-    }
+
+function parseJSONRecords(j) {
+  if (Array.isArray(j)) {
+    if (!j.length) throw new Error("JSON array is empty — need at least one row.");
+    if (typeof j[0] !== 'object' || j[0] === null) throw new Error("JSON array must contain row objects, not primitives.");
+    return flattenRows(j);
   }
-  out.push(cur);
-  return out.map(s => s.trim());
+  if (typeof j === 'object' && j !== null) {
+    for (const k of Object.keys(j)) {
+      if (Array.isArray(j[k]) && j[k].length && typeof j[k][0] === 'object') return flattenRows(j[k]);
+    }
+    throw new Error("This looks like a single JSON object, not a table of rows. Mise needs an array of records — or a CSV with a header and at least one data row.");
+  }
+  throw new Error("JSON parsed but isn't a row array or object.");
+}
+
+// RFC-4180 record parser: quote state machine across the whole text so
+// quoted commas (and quoted newlines) stay in one field. Strips a BOM,
+// skips blank lines outside quotes, and counts dropped/malformed rows.
+function parseCSVRecords(text) {
+  const src = String(text || '').replace(/^\uFEFF/, '');
+  const records = [];
+  let field = '';
+  let record = [];
+  let quoted = false;
+  let i = 0;
+  let droppedBlank = 0;
+
+  const pushField = () => { record.push(field); field = ''; };
+  const pushRecord = () => {
+    const meaningful = record.some(c => String(c).trim() !== '');
+    if (!meaningful) { droppedBlank++; record = []; return; }
+    records.push(record);
+    record = [];
+  };
+
+  while (i < src.length) {
+    const c = src[i];
+    if (quoted) {
+      if (c === '"') {
+        if (src[i + 1] === '"') { field += '"'; i += 2; continue; }
+        quoted = false; i++; continue;
+      }
+      field += c; i++; continue;
+    }
+    if (c === '"') { quoted = true; i++; continue; }
+    if (c === ',') { pushField(); i++; continue; }
+    if (c === '\r') { i++; continue; }
+    if (c === '\n') { pushField(); pushRecord(); i++; continue; }
+    field += c; i++;
+  }
+  pushField();
+  if (record.length && record.some(c => String(c).trim() !== '')) pushRecord();
+  else if (record.length) droppedBlank++;
+
+  if (quoted) throw new Error("CSV has an unclosed quote — check the last quoted field.");
+  return { records, droppedBlank };
+}
+
+function splitCSV(line) {
+  return parseCSVRecords(line).records[0] || [];
+}
+
+function rowsFromCsvRecords(records, droppedBlank) {
+  if (records.length < 2) throw new Error("Need at least a header row and one data row.");
+  const headers = records[0].map((h, i) => {
+    const name = String(h || '').trim() || `column_${i + 1}`;
+    return name;
+  });
+  const rows = [];
+  let dropped = droppedBlank;
+  for (const cells of records.slice(1)) {
+    if (cells.every(c => String(c).trim() === '')) { dropped++; continue; }
+    const o = {};
+    headers.forEach((h, i) => { o[h] = coerceCell(cells[i]); });
+    if (Object.values(o).every(v => v === null || v === '')) { dropped++; continue; }
+    rows.push(o);
+  }
+  if (!rows.length) throw new Error("Need at least a header row and one data row.");
+  return { rows, dropped };
+}
+
+function incomingKind(text) {
+  const trimmed = String(text || '').replace(/^\uFEFF/, '').trim();
+  if (!trimmed) throw new Error("Nothing to parse — paste JSON or CSV.");
+  const looksJSON = trimmed[0] === '{' || trimmed[0] === '[';
+  if (looksJSON) {
+    let j;
+    try { j = JSON.parse(trimmed); }
+    catch (e) { throw new Error("That looks like JSON but didn't parse: " + e.message); }
+    if (isRecipePayload(j)) return { kind: 'recipe', recipe: j };
+    const rows = parseJSONRecords(j);
+    return { kind: 'rows', rows, health: { rowsParsed: rows.length, rowsDropped: 0, format: 'json' } };
+  }
+  const { records, droppedBlank } = parseCSVRecords(trimmed);
+  const { rows, dropped } = rowsFromCsvRecords(records, droppedBlank);
+  return { kind: 'rows', rows, health: { rowsParsed: rows.length, rowsDropped: dropped, format: 'csv' } };
+}
+
+function parseInput(text) {
+  const incoming = incomingKind(text);
+  if (incoming.kind === 'recipe') {
+    throw new Error("That file is a Mise recipe. Drop it on the empty plate to load the layout, then add data.");
+  }
+  return incoming.rows;
 }
 
 // ─── schema inference ──────────────────────────────────────────────
+function isPlainObject(v) {
+  return !!(v && typeof v === 'object' && !Array.isArray(v));
+}
+
+function columnLooksLikeRatio(name, values) {
+  if (!values.length || !values.every(v => typeof v === 'number' && v >= 0 && v <= 2)) return false;
+  const n = String(name || '').toLowerCase();
+  if (/(pct|percent|percentage|churn|nrr|crr|rate|ratio)/.test(n)) return true;
+  const allInts = values.every(v => Number.isInteger(v));
+  if (allInts && values.every(v => v <= 2)) return false;
+  return values.some(v => !Number.isInteger(v));
+}
+
 function inferSchema(rows) {
   if (!rows.length) return [];
   const cols = Object.keys(rows[0]);
   return cols.map(name => {
     const values = rows.map(r => r[name]).filter(v => v !== null && v !== undefined && v !== '');
     let type = 'string';
-    if (values.length && values.every(v => typeof v === 'number')) type = 'number';
-    else if (values.length && values.every(v => /^\d{4}-\d{2}(-\d{2})?/.test(String(v)))) type = 'date';
-    else if (values.length && values.every(v => /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(String(v)))) type = 'date';
-    const unique = new Set(values.map(String)).size;
+    if (values.length && values.every(isPlainObject)) type = 'object';
+    else if (values.length && values.every(v => Array.isArray(v))) type = 'object';
+    else if (values.length && values.every(v => typeof v === 'number')) type = 'number';
+    else if (values.length && values.every(v => looksLikeDate(v))) type = 'date';
+    const unique = new Set(values.map(v => isPlainObject(v) || Array.isArray(v) ? JSON.stringify(v) : String(v))).size;
     if (type === 'string' && unique <= Math.min(20, Math.max(8, Math.ceil(values.length * 0.6)))) type = 'category';
+    const asPercent = type === 'number' && columnLooksLikeRatio(name, values);
     let stat = '';
     if (type === 'number') {
       const min = Math.min(...values), max = Math.max(...values);
-      stat = `${fmtCompact(min)} – ${fmtCompact(max)}`;
+      stat = `${fmtCompact(min, name)} – ${fmtCompact(max, name)}`;
     } else if (type === 'date') {
       stat = `${values[0]} → ${values[values.length-1]}`;
+    } else if (type === 'object') {
+      stat = 'nested';
     } else {
       stat = `${unique} unique`;
     }
-    return { name, type, stat, unique };
+    return { name, type, stat, unique, asPercent };
   });
+}
+
+function iqrBounds(values) {
+  if (values.length < 4) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const q = p => {
+    const idx = (sorted.length - 1) * p;
+    const lo = Math.floor(idx), hi = Math.ceil(idx);
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+  };
+  const q1 = q(0.25), q3 = q(0.75);
+  const iqr = q3 - q1;
+  return { lo: q1 - 1.5 * iqr, hi: q3 + 1.5 * iqr };
+}
+
+function buildParseHealth(rows, schema, incomingHealth) {
+  const datesUnparsed = schema.filter(c => c.type === 'string' || c.type === 'category').reduce((n, c) => {
+    const hits = rows.filter(r => r[c.name] != null && r[c.name] !== '' && looksLikeDate(r[c.name])).length;
+    return n + (hits >= Math.max(2, Math.ceil(rows.length * 0.5)) ? hits : 0);
+  }, 0);
+  let outlierCount = 0;
+  for (const c of schema.filter(col => col.type === 'number')) {
+    const vals = rows.map(r => r[c.name]).filter(v => typeof v === 'number');
+    const bounds = iqrBounds(vals);
+    if (!bounds) continue;
+    outlierCount += vals.filter(v => v < bounds.lo || v > bounds.hi).length;
+  }
+  return {
+    rowsParsed: incomingHealth?.rowsParsed ?? rows.length,
+    rowsDropped: incomingHealth?.rowsDropped ?? 0,
+    datesUnparsed,
+    outlierCount,
+    format: incomingHealth?.format || 'unknown'
+  };
 }
 
 // ─── recipe planner — AI does the layout decision ──────────────────
 // The deterministic planner below is ONLY a safety net for when the model
 // is unreachable, returns garbage, or times out. The whole product
 // hinges on the AI making smart layout choices from the schema.
+
+function slugCol(name) {
+  return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function findColumnByLabel(label, schema) {
+  const needle = slugCol(label);
+  if (!needle) return null;
+  const cols = schema || state.schema || [];
+  return cols.find(c => slugCol(c.name) === needle)
+    || cols.find(c => needle.includes(slugCol(c.name)) || slugCol(c.name).includes(needle))
+    || null;
+}
+
+function normalizeTableFields(fields = {}, title = '', schema) {
+  const cols = schema || state.schema || [];
+  let limit = Number(fields.limit);
+  let sort = fields.sort || fields.orderBy || null;
+  let order = String(fields.order || fields.dir || '').toLowerCase();
+  const titleText = String(title || '');
+  const topMatch = titleText.match(/top\s+(\d+)/i);
+  if (topMatch) limit = Number(topMatch[1]);
+  if (!Number.isFinite(limit) || limit <= 0) limit = 10;
+  limit = Math.min(500, Math.max(1, Math.round(limit)));
+  if (!sort) {
+    const byMatch = titleText.match(/\bby\s+(.+?)$/i);
+    if (byMatch) {
+      const col = findColumnByLabel(byMatch[1], cols);
+      if (col) sort = col.name;
+    }
+  } else {
+    const col = findColumnByLabel(sort, cols) || cols.find(c => c.name === sort);
+    sort = col?.name || null;
+  }
+  if (order !== 'asc' && order !== 'desc') {
+    order = /bottom|lowest|ascending|\basc\b/i.test(titleText) ? 'asc' : 'desc';
+  }
+  return sort ? { limit, sort, order } : { limit };
+}
 
 const VALID_WIDGET_TYPES = new Set(['kpi','line','bar','donut','statlist','countbar','table']);
 const VALID_SPANS = new Set([3, 4, 6, 8, 12]);
@@ -318,7 +504,7 @@ function parseAndValidateRecipe(raw, schema, rows) {
     if (w.type === 'kpi') {
       const aggregate = normalizeKpiAggregate(fields.aggregate, w.title);
       const vals = rows.map(r => r[fields.metric]).filter(v => typeof v === 'number');
-      const computed = computeKPIFromValues(vals, aggregate);
+      const computed = computeKPIFromValues(vals, aggregate, fields.metric);
       validated.push({
         type: 'kpi', span,
         label: w.title || humanize(fields.metric),
@@ -326,6 +512,7 @@ function parseAndValidateRecipe(raw, schema, rows) {
         value: computed.value,
         delta: computed.delta,
         aggregate,
+        excludedOutlier: computed.excludedOutlier,
         sparkCol: aggregate === 'last' ? fields.metric : null
       });
       continue;
@@ -343,7 +530,7 @@ function parseAndValidateRecipe(raw, schema, rows) {
       continue;
     }
     if (w.type === 'table') {
-      validated.push({ type: 'table', span: 12, title: w.title || 'Raw rows', limit: Number(fields.limit) || 10 });
+      validated.push({ type: 'table', span: 12, title: w.title || 'Raw rows', ...normalizeTableFields(fields, w.title, schema) });
       continue;
     }
   }
@@ -387,7 +574,7 @@ function deterministicRecipe(rows, schema) {
     ].filter(Boolean);
     if (obs.length) widgets.push({ type: 'observations', span: 12, observations: obs.slice(0, 3) });
     if (breakdown) widgets.push({ type: 'countbar', span: 6, title: `Records by ${humanize(breakdown.name)}`, cat: breakdown.name });
-    widgets.push({ type: 'table', span: 12, title: 'Rows', limit: 10 });
+    widgets.push({ type: 'table', span: 12, title: 'Rows', ...normalizeTableFields({ limit: 10 }, 'Rows', schema) });
     return { title: 'Entity Overview', widgets };
   }
 
@@ -427,18 +614,34 @@ function deterministicRecipe(rows, schema) {
     widgets.push({ type: 'bar', span: 6, title: humanize(col.name) + (dateCol ? ' over time' : ''), x: dateCol ? dateCol.name : (catCols[0]?.name || schema[0].name), y: col.name });
   });
 
-  widgets.push({ type: 'table', span: 12, title: 'Raw rows', limit: 10 });
+  widgets.push({ type: 'table', span: 12, title: 'Raw rows', ...normalizeTableFields({ limit: 10 }, 'Raw rows', schema) });
 
   return { title: 'Untitled dashboard', widgets };
 }
 
-// aggregate rows by category, summing a metric
-function aggregateBy(rows, catKey, metricKey) {
+function looksLikeLevelMetric(name) {
+  return /(mrr|arr|nrr|crr|balance|accounts|headcount|price|rate|ratio|stock|aum)/i.test(String(name || ''));
+}
+
+function chooseGroupMode(rows, catKey, metricKey) {
+  const seen = new Map();
+  for (const r of rows) {
+    const k = String(r[catKey] ?? '—');
+    seen.set(k, (seen.get(k) || 0) + 1);
+  }
+  const repeats = [...seen.values()].some(n => n > 1);
+  return (repeats && looksLikeLevelMetric(metricKey)) ? 'last' : 'sum';
+}
+
+// aggregate rows by category, summing a metric (or taking last for snapshot levels)
+function aggregateBy(rows, catKey, metricKey, mode) {
+  const resolved = mode || chooseGroupMode(rows, catKey, metricKey);
   const map = new Map();
   for (const r of rows) {
     const k = String(r[catKey] ?? '—');
     const v = typeof r[metricKey] === 'number' ? r[metricKey] : 0;
-    map.set(k, (map.get(k) ?? 0) + v);
+    if (resolved === 'last') map.set(k, v);
+    else map.set(k, (map.get(k) ?? 0) + v);
   }
   return [...map.entries()].map(([k, v]) => ({ key: k, value: v }))
     .sort((a, b) => b.value - a.value);
@@ -465,21 +668,68 @@ function hashString(s) {
 }
 
 // ─── helpers ────────────────────────────────────────────────────────
-function humanize(s) { return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
-function fmtCompact(n) {
+function humanize(s) { return String(s || '').replace(/_/g, ' ').replace(/\./g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
+function columnPrefersPercent(colName) {
+  const col = (state.schema || []).find(c => c.name === colName);
+  return !!(col && col.asPercent);
+}
+function fmtScaled(n, div, suffix) {
+  const scaled = n / div;
+  const digits = Math.abs(scaled) >= 100 ? 0 : 1;
+  return scaled.toFixed(digits).replace(/\.0$/, '') + suffix;
+}
+function fmtCompact(n, colName) {
   if (typeof n !== 'number' || isNaN(n)) return '—';
+  if (columnPrefersPercent(colName) || (colName && /(pct|percent|churn|nrr|crr|rate|ratio)/i.test(colName) && n >= 0 && n <= 2)) {
+    const pct = n * 100;
+    const digits = Math.abs(pct) >= 10 ? 1 : 2;
+    return pct.toFixed(digits).replace(/\.0+$/, '') + '%';
+  }
   const a = Math.abs(n);
-  if (a >= 1e9) return (n/1e9).toFixed(1).replace(/\.0$/,'') + 'B';
-  if (a >= 1e6) return (n/1e6).toFixed(1).replace(/\.0$/,'') + 'M';
-  if (a >= 1e3) return (n/1e3).toFixed(1).replace(/\.0$/,'') + 'k';
+  if (a >= 1e12 || (a >= 1e9 && a / 1e9 >= 999.95)) return fmtScaled(n, 1e12, 'T');
+  if (a >= 1e9) return fmtScaled(n, 1e9, 'B');
+  if (a >= 1e6) return fmtScaled(n, 1e6, 'M');
+  if (a >= 1e3) return fmtScaled(n, 1e3, 'k');
   if (a >= 100) return n.toFixed(0);
   if (Number.isInteger(n)) return String(n);
   return n.toFixed(2);
 }
-function fmtFull(n) {
+function fmtFull(n, colName) {
+  if (isPlainObject(n) || Array.isArray(n)) return n;
   if (typeof n !== 'number') return String(n ?? '—');
+  if (columnPrefersPercent(colName) || (colName && /(pct|percent|churn|nrr|crr|rate|ratio)/i.test(colName) && n >= 0 && n <= 2)) {
+    return fmtCompact(n, colName);
+  }
   if (Number.isInteger(n)) return n.toLocaleString();
   return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function chromePillLabel() {
+  if (hasHttpSource()) return 'HTTP · refreshable';
+  if (state.recipe) return 'Live · ready to export';
+  return 'Local · not exported';
+}
+
+function hasHttpSource() {
+  const src = state.dataSource || state.recipe?.dataSource;
+  return !!(src && src.type === 'http' && src.url);
+}
+
+function syncChrome() {
+  const hasDash = !!(state.recipe && state.rows);
+  const exportBtn = document.getElementById('export-btn');
+  const recipeBtn = document.getElementById('export-recipe-btn');
+  const refreshBtn = document.getElementById('refresh-btn');
+  if (exportBtn) exportBtn.disabled = !hasDash;
+  if (recipeBtn) recipeBtn.disabled = !hasDash;
+  if (refreshBtn) refreshBtn.disabled = !(hasDash && hasHttpSource());
+}
+
+function tableTransformLabel(w) {
+  const bits = [];
+  if (w.sort) bits.push(`sort: ${w.sort} ${w.order || 'desc'}`);
+  if (w.limit) bits.push(`limit ${w.limit}`);
+  return bits.join(' · ');
 }
 
 // ─── render ─────────────────────────────────────────────────────────
@@ -504,12 +754,25 @@ function renderDashboard() {
   document.getElementById('dash-title').textContent = state.recipe.title;
   document.getElementById('dash-meta').textContent =
     `${state.rows.length} rows · ${state.schema.length} cols · rendered ${new Date().toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}`;
+  const health = state.parseHealth || buildParseHealth(state.rows, state.schema, { rowsParsed: state.rows.length, rowsDropped: 0 });
+  const healthEl = document.getElementById('dash-health');
+  if (healthEl) {
+    const parts = [
+      `${health.rowsParsed} row${health.rowsParsed === 1 ? '' : 's'} parsed`,
+      `${health.rowsDropped} dropped`
+    ];
+    if (health.datesUnparsed) parts.push(`${health.datesUnparsed} dates unparsed`);
+    if (health.outlierCount) parts.push(`${health.outlierCount} outlier${health.outlierCount === 1 ? '' : 's'}`);
+    healthEl.textContent = parts.join(' · ');
+    healthEl.hidden = false;
+  }
   const grid = document.getElementById('dash-grid');
   let banner = '';
   if (state.recipe.fallback) {
     banner = `<div class="w w-banner" style="grid-column:span 12;">
       <span class="banner-eyebrow">⚠ Couldn’t reach the AI</span>
-      <span class="banner-msg">Showing a default layout based on your schema. Try again to get an AI-designed dashboard.</span>
+      <span class="banner-msg">Showing a default layout based on your schema. Notes were kept — try again for an AI-designed dashboard. The fallback is a starting point, not a claim that the model was right.</span>
+      <button type="button" class="btn btn-ghost retry-ai-btn" id="retry-ai-btn">Try again</button>
     </div>`;
   }
   grid.innerHTML = banner + state.recipe.widgets.map(w => {
@@ -518,11 +781,16 @@ function renderDashboard() {
     // Inject data-fp onto the first .w element so we can find it for the pulse
     return html.replace(/^<div class="w /, `<div data-fp="${escapeHTML(fp)}" class="w `);
   }).join('');
-  document.getElementById('export-btn').disabled = false;
-  document.getElementById('export-recipe-btn').disabled = false;
-  document.getElementById('refresh-btn').disabled = state.dataSource?.type !== 'http';
+  grid.querySelector('#retry-ai-btn')?.addEventListener('click', retryAiLayout);
+  grid.querySelectorAll('[data-copy-md]').forEach(btn => {
+    btn.addEventListener('click', () => copyTableMarkdown(btn.dataset.copyMd));
+  });
+  grid.querySelectorAll('[data-export-csv]').forEach(btn => {
+    btn.addEventListener('click', () => exportTableCsv(btn.dataset.exportCsv));
+  });
+  syncChrome();
   document.getElementById('crumb').textContent = state.recipe.title;
-  document.getElementById('status-pill').innerHTML = `<span class="pill-dot active"></span>${state.dataSource?.type === 'http' ? 'HTTP · refreshable' : 'Live · ready to export'}`;
+  document.getElementById('status-pill').innerHTML = `<span class="pill-dot active"></span>${chromePillLabel()}`;
 }
 
 function renderWidget(w) {
@@ -563,6 +831,9 @@ function sparklineSVG(values, w = 100, h = 28) {
 
 function widgetKPI(w) {
   const deltaTxt = w.delta == null ? '' : `<div class="delta ${w.delta < 0 ? 'neg' : ''}">${w.delta >= 0 ? '↑' : '↓'} ${Math.abs(w.delta).toFixed(1)}% vs prev</div>`;
+  const outlierChip = w.excludedOutlier
+    ? `<div class="transform-chip" title="Last tick looked like an outlier, so the KPI uses the previous in-range value.">excl. outlier</div>`
+    : '';
   let spark = '';
   if (w.sparkCol) {
     const vals = state.rows.map(r => r[w.sparkCol]).filter(v => typeof v === 'number');
@@ -572,6 +843,7 @@ function widgetKPI(w) {
     <div class="label">${escapeHTML(w.label)}</div>
     <div class="value">${escapeHTML(w.value)}</div>
     ${deltaTxt}
+    ${outlierChip}
     ${spark}
   </div>`;
 }
@@ -585,7 +857,8 @@ function widgetHero(w) {
 }
 
 function widgetDonut(w) {
-  const data = aggregateBy(state.rows, w.cat, w.metric).slice(0, 8);
+    const mode = chooseGroupMode(state.rows, w.cat, w.metric);
+    const data = aggregateBy(state.rows, w.cat, w.metric, mode).slice(0, 8);
   const total = data.reduce((s, d) => s + d.value, 0) || 1;
   const colors = ['var(--accent)','var(--accent-2)','var(--accent-3)','var(--accent-4)','#7a5a3a','#6b4f6b','#3a5a5a','#5a3a3a'];
   const cx = 90, cy = 90, r = 70, rIn = 44;
@@ -608,7 +881,7 @@ function widgetDonut(w) {
       <span class="v">${fmtCompact(d.value)}</span>
       <span class="p">${(d.value/total*100).toFixed(0)}%</span></li>`).join('');
   return `<div class="w w-donut" style="grid-column:span ${w.span};">
-    <div class="w-hd"><h3>${escapeHTML(w.title)}</h3><span class="meta">donut · ${data.length}</span></div>
+    <div class="w-hd"><h3>${escapeHTML(w.title)}</h3><span class="meta">donut · ${data.length}${mode === 'last' ? ' · last' : ''}</span></div>
     <div class="donut-body">
       <svg viewBox="0 0 180 180" width="180" height="180">${arcs}
         <text x="${cx}" y="${cy-2}" text-anchor="middle" font-family="var(--font-display)" font-style="italic" font-size="22" fill="var(--fg)">${fmtCompact(total)}</text>
@@ -742,24 +1015,64 @@ function widgetBar(w) {
   </div>`;
 }
 
+function sortedTableRows(w) {
+  const rows = [...(state.rows || [])];
+  if (w.sort) {
+    const dir = w.order === 'asc' ? 1 : -1;
+    const col = (state.schema || []).find(c => c.name === w.sort);
+    rows.sort((a, b) => {
+      const av = a[w.sort], bv = b[w.sort];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (col?.type === 'number' || (typeof av === 'number' && typeof bv === 'number')) {
+        return (av - bv) * dir;
+      }
+      return String(av).localeCompare(String(bv), undefined, { numeric: true }) * dir;
+    });
+  }
+  return rows.slice(0, w.limit || 10);
+}
+
+function objectChip(value) {
+  let json = '';
+  try { json = JSON.stringify(value); } catch { json = String(value); }
+  return `<span class="obj-chip" title="${escapeHTML(json)}">{…}</span>`;
+}
+
+function formatTableCell(v, col) {
+  if (isPlainObject(v) || Array.isArray(v)) return `<td>${objectChip(v)}</td>`;
+  if (col.type === 'number') return `<td class="num">${escapeHTML(fmtFull(v, col.name))}</td>`;
+  if (col.name.toLowerCase().includes('status')) {
+    const cls = String(v).toLowerCase().includes('paid') || String(v).toLowerCase().includes('ok') ? 'ok'
+      : String(v).toLowerCase().includes('pending') || String(v).toLowerCase().includes('warn') ? 'warn'
+      : String(v).toLowerCase().includes('fail') || String(v).toLowerCase().includes('error') ? 'bad' : '';
+    return `<td><span class="badge ${cls}">${escapeHTML(String(v ?? '—'))}</span></td>`;
+  }
+  const text = String(v ?? '—');
+  const truncated = text.length > 48 ? text.slice(0, 45) + '…' : text;
+  return `<td title="${escapeHTML(text)}">${escapeHTML(truncated)}</td>`;
+}
+
 function widgetTable(w) {
-  const rows = state.rows.slice(0, w.limit || 10);
+  const rows = sortedTableRows(w);
   const cols = state.schema;
   const head = cols.map(c => `<th class="${c.type==='number'?'num':''}">${escapeHTML(humanize(c.name))}</th>`).join('');
-  const body = rows.map(r => `<tr>${cols.map(c => {
-    const v = r[c.name];
-    if (c.type === 'number') return `<td class="num">${fmtFull(v)}</td>`;
-    if (c.name.toLowerCase().includes('status')) {
-      const cls = String(v).toLowerCase().includes('paid') || String(v).toLowerCase().includes('ok') ? 'ok'
-        : String(v).toLowerCase().includes('pending') || String(v).toLowerCase().includes('warn') ? 'warn'
-        : String(v).toLowerCase().includes('fail') || String(v).toLowerCase().includes('error') ? 'bad' : '';
-      return `<td><span class="badge ${cls}">${escapeHTML(String(v))}</span></td>`;
-    }
-    return `<td>${escapeHTML(String(v ?? '—'))}</td>`;
-  }).join('')}</tr>`).join('');
-  return `<div class="w w-table" style="grid-column:span ${w.span};">
-    <div class="w-hd"><h3>${escapeHTML(w.title)}</h3><span class="meta">${state.rows.length} rows · showing ${rows.length}</span></div>
-    <table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+  const body = rows.map(r => `<tr>${cols.map(c => formatTableCell(r[c.name], c)).join('')}</tr>`).join('');
+  const transform = tableTransformLabel(w);
+  const chip = transform ? `<span class="transform-chip" title="Chef transform applied to this table">${escapeHTML(transform)}</span>` : '';
+  const fp = widgetFingerprint(w);
+  return `<div class="w w-table${state.recipe?.fallback ? ' is-fallback' : ''}" style="grid-column:span ${w.span};">
+    <div class="w-hd">
+      <h3>${escapeHTML(w.title)}</h3>
+      <span class="meta">${state.rows.length} rows · showing ${rows.length}</span>
+    </div>
+    <div class="table-toolbar">
+      ${chip}
+      <button type="button" class="btn btn-ghost table-export-btn" data-export-csv="${escapeHTML(fp)}">CSV ↓</button>
+      <button type="button" class="btn btn-ghost table-export-btn" data-copy-md="${escapeHTML(fp)}">Copy MD</button>
+    </div>
+    <div class="table-scroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
   </div>`;
 }
 
@@ -829,7 +1142,8 @@ function restoreRecent(id) {
   state.recipe = entry.recipe;
   state.title = entry.title;
   state.id = entry.id;
-  state.dataSource = entry.dataSource || null;
+  state.dataSource = entry.dataSource || entry.recipe?.dataSource || null;
+  state.parseHealth = entry.parseHealth || buildParseHealth(entry.rows, entry.schema, { rowsParsed: entry.rows?.length || 0, rowsDropped: 0 });
   renderDashboard();
   showStage('dash');
 }
@@ -840,34 +1154,64 @@ function persistCurrent() {
   saveRecent({
     id, title: state.recipe.title,
     rows: state.rows, schema: state.schema, recipe: state.recipe,
-    dataSource: state.dataSource || null,
+    dataSource: state.dataSource || state.recipe.dataSource || null,
+    parseHealth: state.parseHealth || null,
     savedAt: Date.now(),
     cols: state.schema.length
   });
 }
 
 // ─── exports ────────────────────────────────────────────────────────
-function downloadFile(name, blob) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = name; a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+function exportFilename(base, ext) {
+  const slug = String(base || 'dashboard').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'dashboard';
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  return `${slug}-${ts}.${ext}`;
 }
-function exportRecipe() {
-  if (!state.recipe) return;
-  const recipe = {
+
+function downloadFile(name, blob) {
+  if (!blob || !blob.size) throw new Error('Export produced an empty file.');
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.rel = 'noopener';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    a.remove();
+  } catch (e) {
+    URL.revokeObjectURL(url);
+    throw e;
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  return name;
+}
+
+function buildRecipePayload() {
+  return {
     title: state.recipe.title,
     schema: state.schema,
-    widgets: state.recipe.widgets,
+    widgets: toCanonicalWidgets(state.recipe.widgets),
     rowCount: state.rows.length,
     dataSource: state.dataSource || null,
     generatedAt: new Date().toISOString(),
-    generator: 'Mise v0.5'
+    generator: 'Mise v0.6'
   };
-  const blob = new Blob([JSON.stringify(recipe, null, 2)], { type: 'application/json' });
-  const fname = (state.recipe.title || 'dashboard').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g,'');
-  downloadFile(`${fname}.recipe.json`, blob);
-  flashStatus('Recipe exported');
+}
+
+function exportRecipe() {
+  if (!state.recipe) return;
+  try {
+    const recipe = buildRecipePayload();
+    const blob = new Blob([JSON.stringify(recipe, null, 2)], { type: 'application/json' });
+    const fname = exportFilename(state.recipe.title || 'dashboard', 'recipe.json');
+    downloadFile(fname, blob);
+    flashStatus('Recipe exported');
+  } catch (e) {
+    console.warn('[export] recipe failed', e);
+    flashStatus(e.message || 'Recipe export failed', true);
+  }
 }
 async function exportPNG() {
   if (!state.recipe) return;
@@ -884,18 +1228,61 @@ async function exportPNG() {
       windowWidth: document.documentElement.scrollWidth,
       windowHeight: dash.scrollHeight,
     });
-    canvas.toBlob(b => {
-      if (!b) {
-        flashStatus('Export failed', true);
-        return;
-      }
-      const fname = (state.recipe.title || 'dashboard').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g,'');
-      downloadFile(`${fname}.png`, b);
-      flashStatus('PNG exported');
-    }, 'image/png');
+    const blob = await new Promise((resolve, reject) => {
+      canvas.toBlob(b => b ? resolve(b) : reject(new Error('PNG encode failed')), 'image/png');
+    });
+    const fname = exportFilename(state.recipe.title || 'dashboard', 'png');
+    downloadFile(fname, blob);
+    flashStatus('PNG exported');
   } catch (e) {
     console.warn('[export] PNG export failed', e);
-    flashStatus('Export failed', true);
+    flashStatus(e.message || 'Export failed', true);
+  }
+}
+
+function tableRowsForExport(fp) {
+  const w = (state.recipe?.widgets || []).find(widget => widgetFingerprint(widget) === fp)
+    || (state.recipe?.widgets || []).find(widget => widget.type === 'table');
+  if (!w) return { cols: state.schema || [], rows: [] };
+  return { cols: state.schema || [], rows: sortedTableRows(w) };
+}
+
+function csvEscape(v) {
+  if (isPlainObject(v) || Array.isArray(v)) {
+    try { v = JSON.stringify(v); } catch { v = '{…}'; }
+  }
+  const s = v == null ? '' : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function exportTableCsv(fp) {
+  try {
+    const { cols, rows } = tableRowsForExport(fp);
+    const header = cols.map(c => csvEscape(c.name)).join(',');
+    const body = rows.map(r => cols.map(c => csvEscape(r[c.name])).join(',')).join('\n');
+    const blob = new Blob([header + '\n' + body + '\n'], { type: 'text/csv;charset=utf-8' });
+    downloadFile(exportFilename('table', 'csv'), blob);
+    flashStatus('CSV exported');
+  } catch (e) {
+    flashStatus(e.message || 'CSV export failed', true);
+  }
+}
+
+async function copyTableMarkdown(fp) {
+  const { cols, rows } = tableRowsForExport(fp);
+  const head = `| ${cols.map(c => humanize(c.name)).join(' | ')} |`;
+  const sep = `| ${cols.map(() => '---').join(' | ')} |`;
+  const body = rows.map(r => `| ${cols.map(c => {
+    const v = r[c.name];
+    if (isPlainObject(v) || Array.isArray(v)) return '{…}';
+    return String(v ?? '');
+  }).join(' | ')} |`).join('\n');
+  const md = [head, sep, body].join('\n');
+  try {
+    await navigator.clipboard.writeText(md);
+    flashStatus('Copied markdown');
+  } catch {
+    flashStatus('Copy failed', true);
   }
 }
 function loadScript(src) {
@@ -917,10 +1304,9 @@ function loadScript(src) {
 function flashStatus(msg, isErr) {
   const pill = document.getElementById('status-pill');
   if (statusFlashTimer) clearTimeout(statusFlashTimer);
-  const prev = pill.innerHTML;
   pill.innerHTML = `<span class="pill-dot ${isErr ? '' : 'active'}"></span>${msg}`;
   statusFlashTimer = setTimeout(() => {
-    pill.innerHTML = prev;
+    pill.innerHTML = `<span class="pill-dot ${state.recipe ? 'active' : ''}"></span>${chromePillLabel()}`;
     statusFlashTimer = null;
   }, 2200);
 }
@@ -930,18 +1316,25 @@ async function runPipeline(rawText) {
   return runPipelineFromRows(rawText, null);
 }
 
-async function runPipelineFromRows(rawText, dataSource) {
+async function runPipelineFromRows(rawText, dataSource, options = {}) {
   resetChefSession();
   document.getElementById('err').style.display = 'none';
-  let rows;
-  try { rows = parseInput(rawText); }
+  let incoming;
+  try { incoming = incomingKind(rawText); }
   catch (e) {
     const err = document.getElementById('err');
     err.textContent = e.message; err.style.display = 'block';
     return;
   }
+  if (incoming.kind === 'recipe') {
+    acceptPendingRecipe(incoming.recipe);
+    return;
+  }
+  const rows = incoming.rows;
   state.rows = rows;
+  state.sourceText = rawText;
   state.dataSource = dataSource;
+  state.notes = options.notes ?? (document.getElementById('notes')?.value || '');
   showStage('loading');
   document.getElementById('crumb').textContent = 'Reading…';
   document.getElementById('loading-file-text').textContent =
@@ -954,13 +1347,20 @@ async function runPipelineFromRows(rawText, dataSource) {
   setStepActive('infer');
   await wait(380);
   state.schema = inferSchema(rows);
+  state.parseHealth = buildParseHealth(rows, state.schema, incoming.health);
   renderSchema(state.schema);
   await stepAdvance('infer', 200);
 
-  // step 3: layout (AI)
+  // step 3: layout (AI) — skipped when a recipe is applied to new data
   setStepActive('layout');
-  const notes = document.getElementById('notes')?.value || '';
-  state.recipe = await planRecipe(rows, state.schema, notes);
+  const preset = options.recipe || state.pendingRecipe;
+  if (preset) {
+    state.recipe = applyRecipeToRows(preset, state.schema);
+    state.pendingRecipe = null;
+    renderPendingRecipe();
+  } else {
+    state.recipe = await planRecipe(rows, state.schema, state.notes);
+  }
   await stepAdvance('layout', 200);
 
   // step 4: render
@@ -979,6 +1379,63 @@ async function runPipelineFromRows(rawText, dataSource) {
     el.classList.add('step-pending');
     el.querySelector('.step-meta').textContent = 'queued';
   });
+}
+
+function applyRecipeToRows(recipe, schema) {
+  const canonical = toCanonicalWidgets((recipe?.widgets || []).filter(w => w.type !== 'observations'));
+  const validated = chefValidateRecipe({ widgets: canonical }, schema);
+  const widgets = validated.widgets.length ? validated.widgets : deterministicRecipe(state.rows, schema).widgets;
+  const obs = (recipe?.widgets || []).find(w => w.type === 'observations');
+  if (obs && Array.isArray(obs.observations) && obs.observations.length) {
+    widgets.unshift({ type: 'observations', span: 12, observations: obs.observations.slice(0, 3) });
+  }
+  return {
+    title: recipe?.title || state.title || 'Untitled dashboard',
+    widgets,
+    fallback: false,
+    dataSource: recipe?.dataSource || state.dataSource || null
+  };
+}
+
+function acceptPendingRecipe(recipe) {
+  state.pendingRecipe = recipe;
+  renderPendingRecipe();
+  const paste = document.getElementById('paste')?.value || '';
+  const looksLikeData = paste.trim() && !isRecipePayload((() => { try { return JSON.parse(paste); } catch { return null; } })());
+  if (looksLikeData) {
+    runPipelineFromRows(paste, state.dataSource, { recipe });
+    return;
+  }
+  const err = document.getElementById('err');
+  err.textContent = `Recipe loaded: ${recipe.title || 'untitled'}. Drop or paste data to cook it — the AI will not be asked again.`;
+  err.style.display = 'block';
+  flashStatus('Recipe ready — add data');
+}
+
+function renderPendingRecipe() {
+  const el = document.getElementById('pending-recipe');
+  if (!el) return;
+  if (!state.pendingRecipe) { el.hidden = true; el.textContent = ''; return; }
+  el.hidden = false;
+  el.textContent = `Recipe ready: ${state.pendingRecipe.title || 'untitled'} · drop data to apply`;
+}
+
+async function retryAiLayout() {
+  if (!state.rows || !state.schema) return;
+  try {
+    flashStatus('Asking the model again…');
+    showStage('loading');
+    setStepActive('layout');
+    state.recipe = await planRecipe(state.rows, state.schema, state.notes || document.getElementById('notes')?.value || '');
+    await stepAdvance('layout', 160);
+    renderDashboard();
+    persistCurrent();
+    showStage('dash');
+  } catch (e) {
+    flashStatus(e.message || 'Retry failed', true);
+    showStage('dash');
+    renderDashboard();
+  }
 }
 
 async function fetchRemoteData(url) {
@@ -1029,14 +1486,7 @@ async function runHttpPipeline(url) {
 }
 
 function rehydrateRecipeForCurrentRows(recipe, schema) {
-  const canonical = toCanonicalWidgets((recipe?.widgets || []).filter(w => w.type !== 'observations'));
-  const validated = chefValidateRecipe({ widgets: canonical }, schema);
-  const widgets = validated.widgets.length ? validated.widgets : deterministicRecipe(state.rows, schema).widgets;
-  return {
-    title: recipe?.title || state.title || 'Untitled dashboard',
-    widgets,
-    fallback: false
-  };
+  return applyRecipeToRows(recipe, schema);
 }
 
 async function refreshCurrentDashboard() {
@@ -1045,9 +1495,13 @@ async function refreshCurrentDashboard() {
   try {
     flashStatus('Refreshing data…');
     const fetched = await fetchRemoteData(source.url);
-    const rows = parseInput(fetched.text);
+    const incoming = incomingKind(fetched.text);
+    if (incoming.kind !== 'rows') throw new Error('HTTP source did not return tabular data.');
+    const rows = incoming.rows;
     state.rows = rows;
+    state.sourceText = fetched.text;
     state.schema = inferSchema(rows);
+    state.parseHealth = buildParseHealth(rows, state.schema, incoming.health);
     state.recipe = rehydrateRecipeForCurrentRows(state.recipe, state.schema);
     state.dataSource = {
       ...source,
@@ -1107,12 +1561,7 @@ const drop = document.getElementById('drop');
 drop.addEventListener('drop', e => {
   const f = e.dataTransfer.files[0];
   if (!f) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    document.getElementById('paste').value = reader.result;
-    runPipeline(reader.result);
-  };
-  reader.readAsText(f);
+  ingestDroppedFile(f);
 });
 
 // global paste
@@ -1134,13 +1583,25 @@ document.getElementById('file-input').addEventListener('change', e => {
   const f = e.target.files[0];
   if (!f) return;
   document.getElementById('file-name').textContent = f.name + ' · ' + Math.round(f.size/1024) + 'kb';
+  ingestDroppedFile(f);
+});
+
+function ingestDroppedFile(f) {
   const reader = new FileReader();
   reader.onload = () => {
-    document.getElementById('paste').value = reader.result;
-    runPipeline(reader.result);
+    const text = String(reader.result || '');
+    const recipeName = /\.recipe\.json$/i.test(f.name) || /recipe/i.test(f.name);
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch {}
+    if (recipeName || isRecipePayload(parsed)) {
+      acceptPendingRecipe(parsed || JSON.parse(text));
+      return;
+    }
+    document.getElementById('paste').value = text;
+    runPipelineFromRows(text, state.dataSource, { recipe: state.pendingRecipe });
   };
   reader.readAsText(f);
-});
+}
 
 // exports
 document.getElementById('export-recipe-btn').addEventListener('click', exportRecipe);
@@ -1200,7 +1661,7 @@ function widgetFingerprint(w) {
   if (w.type === 'donut')    return `donut:${w.cat}:${w.metric}`;
   if (w.type === 'statlist') return `statlist:${w.cat}:${w.metric}`;
   if (w.type === 'countbar') return `countbar:${w.cat}`;
-  if (w.type === 'table')    return `table:${w.limit || 10}`;
+  if (w.type === 'table')    return `table:${w.sort || ''}:${w.order || ''}:${w.limit || 10}`;
   if (w.type === 'observations') return `observations:${(w.observations || []).join('|')}`;
   return w.type;
 }
@@ -1331,11 +1792,11 @@ Widget shapes — use these exactly:
 - donut:    { "type":"donut", "span":6, "title":"...", "fields":{ "cat":"<category col>", "metric":"<numeric col>" } }
 - statlist: { "type":"statlist", "span":6, "title":"...", "fields":{ "cat":"<category col>", "metric":"<numeric col>" } }
 - countbar: { "type":"countbar", "span":6, "title":"...", "fields":{ "cat":"<category col>" } }
-- table:    { "type":"table", "span":12, "title":"...", "fields":{ "limit": 10 } }
+- table:    { "type":"table", "span":12, "title":"...", "fields":{ "limit": 10, "sort":"<numeric or date col when asking for top/bottom N>", "order":"desc|asc" } }
 - observations: { "type":"observations", "span":12, "title":"What we noticed", "observations":["...","..."] }
 
 Rules:
-- Apply the user's request faithfully. If they say "remove the donut," remove it. If they say "promote X to hero," widen X to span 12 and put it first.
+- Apply the user's request faithfully. If they say "remove the donut," remove it. If they say "promote X to hero," widen X to span 12 and put it first. If they ask for "top N by <metric>", set table.fields.sort to that column, order to desc, and limit to N. A title alone is not enough — unsorted first-N rows are wrong.
 - Span values per row should sum to multiples of 12 (3+3+3+3, 6+6, 8+4, 12).
 - Only reference column names that exist in the schema.
 - Keep widgets the user didn't mention unchanged.
@@ -1404,7 +1865,12 @@ function toCanonicalWidget(w) {
     return { type: 'countbar', span, title: w.title || `Records by ${humanize(cat)}`, fields: { cat } };
   }
   if (w.type === 'table') {
-    return { type: 'table', span: 12, title: w.title || 'Raw rows', fields: { limit: Number(w.limit || w.fields?.limit) || 10 } };
+    const tableFields = normalizeTableFields({
+      limit: w.limit || w.fields?.limit,
+      sort: w.sort || w.fields?.sort,
+      order: w.order || w.fields?.order
+    }, w.title, state.schema);
+    return { type: 'table', span: 12, title: w.title || 'Raw rows', fields: tableFields };
   }
   return null;
 }
@@ -1523,6 +1989,7 @@ function chefValidateRecipe(parsed, schema) {
         value: kpi.value,
         delta: kpi.delta,
         aggregate,
+        excludedOutlier: kpi.excludedOutlier,
         sparkCol: aggregate === 'last' ? fields.metric : null
       });
     } else if (w.type === 'line' || w.type === 'bar') {
@@ -1536,7 +2003,7 @@ function chefValidateRecipe(parsed, schema) {
       if (!isGroupCol(fields.cat)) { dropped++; continue; }
       widgets.push({ type: 'countbar', span, title: w.title || `Records by ${humanize(fields.cat)}`, cat: fields.cat });
     } else if (w.type === 'table') {
-      widgets.push({ type:'table', span: 12, title: w.title || 'Raw rows', limit: Number(fields.limit) || 10 });
+      widgets.push({ type:'table', span: 12, title: w.title || 'Raw rows', ...normalizeTableFields(fields, w.title || canonical?.title, schema) });
     } else if (w.type === 'observations') {
       const obs = Array.isArray(w.observations) ? w.observations.filter(o => typeof o === 'string' && o.trim()).slice(0, 3) : [];
       if (!obs.length) { dropped++; continue; }
@@ -1566,31 +2033,48 @@ function applyPendingHighlights() {
   chef.pendingHighlight = null;
 }
 
-function computeKPIFromValues(vals, aggregate = 'last') {
-  if (!vals.length) return { value: '—', delta: null };
-  if (aggregate === 'count') return { value: formatNum(vals.length), delta: null };
+function computeKPIFromValues(vals, aggregate = 'last', colName) {
+  if (!vals.length) return { value: '—', delta: null, excludedOutlier: false };
+  const fmt = n => formatNum(n, colName);
+  if (aggregate === 'count') return { value: fmt(vals.length), delta: null, excludedOutlier: false };
   if (aggregate === 'sum') {
-    return { value: formatNum(vals.reduce((sum, v) => sum + v, 0)), delta: null };
+    const use = state.excludeOutliers ? dropOutliers(vals) : vals;
+    return { value: fmt(use.reduce((sum, v) => sum + v, 0)), delta: null, excludedOutlier: use.length !== vals.length };
   }
   if (aggregate === 'average') {
-    return { value: formatNum(vals.reduce((sum, v) => sum + v, 0) / vals.length), delta: null };
+    const use = state.excludeOutliers ? dropOutliers(vals) : vals;
+    return { value: fmt(use.reduce((sum, v) => sum + v, 0) / use.length), delta: null, excludedOutlier: use.length !== vals.length };
   }
-  const last = vals[vals.length - 1];
-  const prev = vals[vals.length - 2] ?? last;
+  let series = vals;
+  let excludedOutlier = false;
+  if (state.excludeOutliers && vals.length >= 4) {
+    const last = vals[vals.length - 1];
+    const restBounds = iqrBounds(vals.slice(0, -1));
+    if (restBounds && (last < restBounds.lo || last > restBounds.hi)) {
+      series = vals.slice(0, -1);
+      excludedOutlier = true;
+    }
+  }
+  const last = series[series.length - 1];
+  const prev = series[series.length - 2] ?? last;
   const delta = prev ? ((last - prev) / Math.abs(prev)) * 100 : 0;
-  return { value: formatNum(last), delta };
+  return { value: fmt(last), delta, excludedOutlier };
+}
+
+function dropOutliers(vals) {
+  const bounds = iqrBounds(vals);
+  if (!bounds) return vals;
+  const kept = vals.filter(v => v >= bounds.lo && v <= bounds.hi);
+  return kept.length ? kept : vals;
 }
 
 // Compute a KPI value from a column name (mirrors what the planner does)
 function computeKPI(colName, aggregate = 'last') {
   const vals = state.rows.map(r => r[colName]).filter(v => typeof v === 'number');
-  return computeKPIFromValues(vals, aggregate);
+  return computeKPIFromValues(vals, aggregate, colName);
 }
-function formatNum(n) {
-  if (Math.abs(n) >= 1e9) return (n/1e9).toFixed(1).replace(/\.0$/,'') + 'b';
-  if (Math.abs(n) >= 1e6) return (n/1e6).toFixed(1).replace(/\.0$/,'') + 'm';
-  if (Math.abs(n) >= 1e3) return (n/1e3).toFixed(1).replace(/\.0$/,'') + 'k';
-  return Number.isInteger(n) ? String(n) : n.toFixed(2);
+function formatNum(n, colName) {
+  return fmtCompact(n, colName);
 }
 
 // Wire up
@@ -1629,3 +2113,26 @@ document.querySelectorAll('.chef-suggestion').forEach(btn => {
     chefSubmit(btn.dataset.prompt);
   });
 });
+
+window.__mise = {
+  parseInput,
+  incomingKind,
+  splitCSV,
+  parseCSVRecords,
+  flattenRows,
+  inferSchema,
+  fmtCompact,
+  formatNum,
+  normalizeTableFields,
+  sortedTableRows,
+  downloadFile,
+  exportFilename,
+  isRecipePayload,
+  applyRecipeToRows,
+  buildRecipePayload,
+  tableTransformLabel,
+  computeKPIFromValues,
+  hasHttpSource,
+  syncChrome,
+  get state() { return state; }
+};
