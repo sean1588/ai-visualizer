@@ -579,7 +579,7 @@ test("PNG exports use unique timestamps and surface encode failures", async () =
     });
     await page.locator("#export-btn").click();
     await page.waitForFunction(() => document.body.innerText.toLowerCase().includes("failed"));
-  });
+  }, { allowConsole: /PNG export failed|PNG encode failed/ });
 });
 
 test("one-level nested JSON flattens and never prints [object Object]", async () => {

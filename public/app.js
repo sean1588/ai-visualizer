@@ -674,9 +674,7 @@ function columnPrefersPercent(colName) {
   return !!(col && col.asPercent);
 }
 function fmtScaled(n, div, suffix) {
-  const scaled = n / div;
-  const digits = Math.abs(scaled) >= 100 ? 0 : 1;
-  return scaled.toFixed(digits).replace(/\.0$/, '') + suffix;
+  return (n / div).toFixed(1).replace(/\.0$/, '') + suffix;
 }
 function fmtCompact(n, colName) {
   if (typeof n !== 'number' || isNaN(n)) return '—';
@@ -2038,16 +2036,16 @@ function computeKPIFromValues(vals, aggregate = 'last', colName) {
   const fmt = n => formatNum(n, colName);
   if (aggregate === 'count') return { value: fmt(vals.length), delta: null, excludedOutlier: false };
   if (aggregate === 'sum') {
-    const use = state.excludeOutliers ? dropOutliers(vals) : vals;
-    return { value: fmt(use.reduce((sum, v) => sum + v, 0)), delta: null, excludedOutlier: use.length !== vals.length };
+    return { value: fmt(vals.reduce((sum, v) => sum + v, 0)), delta: null, excludedOutlier: false };
   }
   if (aggregate === 'average') {
-    const use = state.excludeOutliers ? dropOutliers(vals) : vals;
-    return { value: fmt(use.reduce((sum, v) => sum + v, 0) / use.length), delta: null, excludedOutlier: use.length !== vals.length };
+    return { value: fmt(vals.reduce((sum, v) => sum + v, 0) / vals.length), delta: null, excludedOutlier: false };
   }
   let series = vals;
   let excludedOutlier = false;
-  if (state.excludeOutliers && vals.length >= 4) {
+  // Last-tick only, and only on a real series — small categorical totals
+  // are not "outliers," they're the point of a sum/last KPI.
+  if (state.excludeOutliers && vals.length >= 8) {
     const last = vals[vals.length - 1];
     const restBounds = iqrBounds(vals.slice(0, -1));
     if (restBounds && (last < restBounds.lo || last > restBounds.hi)) {
