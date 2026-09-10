@@ -184,16 +184,51 @@ test.after(async () => {
   await once(server, "exit").catch(() => {});
 });
 
-test("landing copy accurately describes sampled-row inference", async () => {
+test("landing copy accurately describes local profiling", async () => {
   await withPage(async page => {
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
     const text = await page.locator("body").innerText();
 
-    assert.match(text, /samples a few rows for inference/i);
-    assert.match(text, /sample rows sent once for inference/i);
+    assert.match(text, /profiles your data locally/i);
+    assert.match(text, /raw rows are not sent/i);
+    assert.match(text, /aggregate facts sent once for inference/i);
     assert.doesNotMatch(text, /Nothing is uploaded/i);
     assert.doesNotMatch(text, /Claude/i);
   }, { allowConsole: /AI response did not validate, falling back/ });
+});
+
+test("planner and Chef prompts use complete-data facts without raw rows", async () => {
+  await withPage(async page => {
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    const rows = Array.from({ length: 20 }, (_, index) => ({
+      date: `2026-01-${String(index + 1).padStart(2, "0")}`,
+      revenue_usd: 100 + index,
+      private_note: `secret-note-${index}`,
+    }));
+    const result = await page.evaluate(input => {
+      const schema = inferSchema(input);
+      state.rows = input;
+      state.schema = schema;
+      state.recipe = {
+        title: "Revenue",
+        widgets: [{ type: "kpi", span: 3, title: "Revenue", label: "Revenue", metric: "revenue_usd", aggregate: "sum", value: "500" }],
+      };
+      return {
+        plan: buildPrompt(input, schema, ""),
+        chef: chefBuildPrompt("Make revenue currency"),
+        profile: buildDataProfile(input, schema),
+      };
+    }, rows);
+
+    assert.match(result.plan, /<DATA_PROFILE>/);
+    assert.match(result.chef, /<DATA_PROFILE>/);
+    assert.doesNotMatch(result.plan, /SAMPLE_ROWS|secret-note/);
+    assert.doesNotMatch(result.chef, /SAMPLE_ROWS|secret-note/);
+    const revenue = result.profile.facts.find(fact => fact.column === "revenue_usd");
+    assert.equal(revenue.sum, 2190);
+    assert.equal(revenue.trend.first, 100);
+    assert.equal(revenue.trend.last, 119);
+  });
 });
 
 test("sample dashboard renders and exports a PNG", async () => {
@@ -389,6 +424,63 @@ test("category bar charts aggregate repeated labels instead of rendering one bar
     assert.match(text, /bar · 3 groups/i);
     assert.doesNotMatch(text, /bar · 5\b/i);
     assert.doesNotMatch(text, /undefined/);
+  });
+});
+
+test("widget assumptions are visible and editable without another AI call", async () => {
+  await withPage(async page => {
+    let cookCalls = 0;
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, AGGREGATE_PLAN, () => { cookCalls++; });
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#paste").fill(JSON.stringify(SEGMENT_REVENUE, null, 2));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    const firstKpi = page.locator(".w-kpi").first();
+    await firstKpi.locator("[data-edit-assumptions]").click();
+    await page.locator('#assumptions-form [name="aggregate"]').selectOption("average");
+    await page.locator('#assumptions-form [name="format"]').selectOption("currency");
+    await page.getByRole("button", { name: "Apply assumptions" }).click();
+
+    const edited = await page.evaluate(() => {
+      const widget = state.recipe.widgets.find(item => item.type === "kpi");
+      return { aggregate: widget.aggregate, format: widget.format };
+    });
+    assert.deepEqual(edited, { aggregate: "average", format: "currency" });
+    assert.match(await firstKpi.innerText(), /\$24k/);
+    assert.equal(cookCalls, 1);
+  });
+});
+
+test("chart points and legends open the contributing-row inspector", async () => {
+  await withPage(async page => {
+    await mockInference(page);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.getByText("SAAS METRICS").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    const point = page.locator(".w-chart circle.chart-hit").first();
+    assert.match(await point.locator("title").textContent(), /Jan.*\$42,000/i);
+    await point.click();
+    assert.match(await page.locator("#inspector-title").textContent(), /Jan/);
+    assert.match(await page.locator("#inspector-meta").textContent(), /1 matching row/);
+    assert.match(await page.locator("#inspector-table").innerText(), /\$42,000/);
+    await page.locator("#inspector-close").click();
+
+    await page.evaluate(() => window.reset());
+    await page.unroute("**/api/cook");
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, {
+      title: "Segment Mix",
+      widgets: [
+        { type: "donut", span: 6, title: "Revenue by Segment", fields: { cat: "segment", metric: "revenue" } },
+      ],
+    });
+    await page.locator("#paste").fill(JSON.stringify(SEGMENT_REVENUE, null, 2));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector(".legend-button");
+    await page.locator(".legend-button").filter({ hasText: "startup" }).click();
+    assert.match(await page.locator("#inspector-title").textContent(), /startup/i);
+    assert.match(await page.locator("#inspector-meta").textContent(), /2 matching rows/);
   });
 });
 

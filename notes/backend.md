@@ -157,7 +157,7 @@ Two call sites to update: `planRecipe` (in `prototype-app.js`) and `chefSubmit`.
 
 Assuming `gpt-4o-mini` at $0.15/M input + $0.60/M output:
 
-- **Per recipe plan**: ~3k input tokens (schema + sample rows) + ~1k output tokens = ~$0.0015
+- **Per recipe plan**: ~3k input tokens (schema + complete-data profile) + ~1k output tokens = ~$0.0015
 - **Per chef edit**: ~4k input tokens (schema + current recipe + request) + ~1k output tokens = ~$0.002
 
 A typical session (1 plan + 3 chef edits) ≈ $0.0075. **133 sessions per dollar.** Even at 10,000 sessions / month launch, that's $75/mo of LLM cost — easily covered by goodwill while we figure out monetization.

@@ -189,6 +189,7 @@ const RECIPE_SCHEMA: OutputSchema = {
                     metric: { type: "string", description: "Numeric column name to aggregate." },
                     aggregate: { enum: ["last", "sum", "average", "count"], description: "How to summarize the numeric column." },
                     spark: { type: "string", description: "Optional date column for the sparkline." },
+                    format: { enum: ["auto", "number", "currency", "percent"], description: "How to display the metric." },
                   },
                   required: ["metric"],
                 },
@@ -207,6 +208,8 @@ const RECIPE_SCHEMA: OutputSchema = {
                   properties: {
                     x: { type: "string", description: "Date column." },
                     y: { type: "string", description: "Numeric column." },
+                    aggregate: { enum: ["sum", "average", "last"], description: "How to combine repeated x values." },
+                    format: { enum: ["auto", "number", "currency", "percent"], description: "How to display the metric." },
                   },
                   required: ["x", "y"],
                 },
@@ -225,6 +228,8 @@ const RECIPE_SCHEMA: OutputSchema = {
                   properties: {
                     x: { type: "string", description: "Date or category column." },
                     y: { type: "string", description: "Numeric column." },
+                    aggregate: { enum: ["sum", "average", "last"], description: "How to combine repeated x values." },
+                    format: { enum: ["auto", "number", "currency", "percent"], description: "How to display the metric." },
                   },
                   required: ["x", "y"],
                 },
@@ -243,6 +248,8 @@ const RECIPE_SCHEMA: OutputSchema = {
                   properties: {
                     cat: { type: "string", description: "Category column." },
                     metric: { type: "string", description: "Numeric column to aggregate per category." },
+                    aggregate: { enum: ["sum", "average", "last"], description: "How to combine category values." },
+                    format: { enum: ["auto", "number", "currency", "percent"], description: "How to display the metric." },
                   },
                   required: ["cat", "metric"],
                 },
@@ -261,6 +268,8 @@ const RECIPE_SCHEMA: OutputSchema = {
                   properties: {
                     cat: { type: "string", description: "Category column." },
                     metric: { type: "string", description: "Numeric column to aggregate per category." },
+                    aggregate: { enum: ["sum", "average", "last"], description: "How to combine category values." },
+                    format: { enum: ["auto", "number", "currency", "percent"], description: "How to display the metric." },
                   },
                   required: ["cat", "metric"],
                 },
@@ -295,6 +304,8 @@ const RECIPE_SCHEMA: OutputSchema = {
                   additionalProperties: false,
                   properties: {
                     limit: { type: "integer", minimum: 1, maximum: 100 },
+                    sort: { type: "string", description: "Optional column to sort by." },
+                    order: { enum: ["asc", "desc"], description: "Sort direction." },
                   },
                 },
               },
