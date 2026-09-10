@@ -1,0 +1,77 @@
+{
+  "seed": 20260910,
+  "datasets": [
+    {
+      "name": "product-usage-weekly",
+      "description": "Weekly account-level SaaS usage, adoption, retention, expansion, and churn signals.",
+      "use_cases": [
+        "feature adoption",
+        "retention analysis",
+        "account health",
+        "plan and region segmentation"
+      ],
+      "rows": 13000,
+      "columns": 21,
+      "files": {
+        "csv": {
+          "path": "product-usage-weekly.csv",
+          "bytes": 1488214,
+          "sha256": "bacdd8ededf7d0bc0ced9f8a3fbab3f19c40bbfd0cfd5128f48ab85577fe5f20"
+        },
+        "json": {
+          "path": "product-usage-weekly.json",
+          "bytes": 5795304,
+          "sha256": "9efed1ef5d6e4f4bcfb5977f507518165824d1d977bce374ebfbfa276b0176ca"
+        }
+      }
+    },
+    {
+      "name": "ecommerce-orders",
+      "description": "Order-level commerce performance with channels, products, discounts, refunds, and margin.",
+      "use_cases": [
+        "revenue analysis",
+        "channel performance",
+        "product mix",
+        "refund and margin analysis"
+      ],
+      "rows": 20000,
+      "columns": 24,
+      "files": {
+        "csv": {
+          "path": "ecommerce-orders.csv",
+          "bytes": 3668189,
+          "sha256": "f3b4593c192081d0bd0f486b42a7cdc5f68573710d582e90cc2987060146b0df"
+        },
+        "json": {
+          "path": "ecommerce-orders.json",
+          "bytes": 11357201,
+          "sha256": "52a4c419475a0763afbb45390a905a050722958c06411c085447996a55e44d47"
+        }
+      }
+    },
+    {
+      "name": "support-tickets",
+      "description": "Customer-support operations with SLA, resolution, CSAT, escalation, and account context.",
+      "use_cases": [
+        "SLA reporting",
+        "support capacity",
+        "issue trends",
+        "customer experience"
+      ],
+      "rows": 12000,
+      "columns": 22,
+      "files": {
+        "csv": {
+          "path": "support-tickets.csv",
+          "bytes": 1919394,
+          "sha256": "ad239c079d72487de00dab3f02049209af046efdcf5df79f85f73b2e10d18bf3"
+        },
+        "json": {
+          "path": "support-tickets.json",
+          "bytes": 6112300,
+          "sha256": "a6afcfc91716f124543006cf792f8a98a746800ce4c4ce70f2d33970a975f177"
+        }
+      }
+    }
+  ]
+}
