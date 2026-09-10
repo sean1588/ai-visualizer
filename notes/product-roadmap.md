@@ -19,7 +19,7 @@ Accounts, hosted collaboration, and marketplaces stay deferred until repeated
 use demonstrates that server-side custody is worth the security and operational
 cost.
 
-## Now
+## Completed
 
 ### Local analytical profile
 
@@ -45,9 +45,15 @@ The direct controls and The Chef must mutate the same recipe representation.
 
 ### Chart exploration
 
-Charts need exact-value tooltips, keyboard-accessible points, interactive
-legends, and a shared source-row inspector. A user should be able to move from
-any visual claim to the rows that produced it.
+Charts provide exact-value tooltips, keyboard-accessible points, interactive
+legends, and a shared source-row inspector. A user can move from any visual
+claim to the rows that produced it.
+
+### Delivery freshness
+
+Static app responses require browser revalidation while CloudFront retains its
+optimized edge cache. Normal refreshes therefore pick up invalidated deployments
+without requiring users to empty their browser cache.
 
 ## Next
 

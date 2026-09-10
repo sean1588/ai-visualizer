@@ -167,6 +167,17 @@ const CACHE_OPTIMIZED      = "658327ea-f89d-4fab-a63d-7e88639e58f6";
 const CACHE_DISABLED       = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad";
 const ORIGIN_REQUEST_VIEWER_EXCEPT_HOST = "b689b0a8-53d0-40ab-baf2-68738e2966ac";
 
+const staticBrowserRevalidation = new aws.cloudfront.ResponseHeadersPolicy("static-browser-revalidation", {
+  comment: "Require browsers to revalidate Mise static assets on normal refreshes.",
+  customHeadersConfig: {
+    items: [{
+      header: "Cache-Control",
+      value: "no-cache, max-age=0, must-revalidate",
+      override: true,
+    }],
+  },
+});
+
 const distribution = new aws.cloudfront.Distribution("site", {
   enabled: true,
   isIpv6Enabled: true,
@@ -199,6 +210,7 @@ const distribution = new aws.cloudfront.Distribution("site", {
     cachedMethods: ["GET", "HEAD"],
     compress: true,
     cachePolicyId: CACHE_OPTIMIZED,
+    responseHeadersPolicyId: staticBrowserRevalidation.id,
   },
   orderedCacheBehaviors: [
     {
