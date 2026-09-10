@@ -86,9 +86,9 @@ The whole product hinges on Claude doing the layout decision. The deterministic 
 ### Prompt shape
 
 **Inputs:**
-- Schema: `[{name, type, sample_values, unique_count, min, max}]`
+- Schema: `[{name, type, unique_count, missing_count}]`
 - Row count: N
-- Sample rows: 5–10 representative rows (first, middle, last for time-series; random for everything else)
+- Complete-data profile: deterministic numeric summaries, trends, date ranges, and low-cardinality category counts computed locally
 - User notes (optional): freeform text from the Notes box on the empty state
 
 **Output (strict JSON):**
@@ -119,7 +119,7 @@ The whole product hinges on Claude doing the layout decision. The deterministic 
 
 ### Prompt-injection hygiene (TODO before public launch)
 
-User-supplied data and Notes both flow into the prompt. Mitigations needed:
+Computed data profiles and Notes both flow into the prompt. Mitigations needed:
 - **Wrap in clearly-fenced blocks** — `<USER_DATA>...</USER_DATA>`, `<USER_NOTES>...</USER_NOTES>` — and tell the model in the system prompt to treat their contents as data, not instructions.
 - **Cap notes length** — 1000 chars in v1, prevents prompt-stuffing.
 - **Strip obvious injection patterns** in the client (instructions like "ignore previous instructions") — defense in depth, not the main barrier.
@@ -130,6 +130,6 @@ This isn't a v1 ship blocker (the demo audience is friendly), but it ships with 
 
 ## Open questions
 
-- **What's the inference service's exact contract?** Does it take a sample of rows? A schema-only digest computed locally? Probably the latter for the strongest privacy promise — design the local schema-inference step to be a real one.
+- **How much categorical detail belongs in the profile?** Low-cardinality labels make breakdowns useful but can still be sensitive. Keep raw row combinations local and revisit label redaction based on real datasets.
 - **Cadence honesty for Doorway 02** — if the user closes the tab, the polling stops. We should be explicit about that ("polls while the dashboard is open"). v1 is not a monitoring service.
 - **Exported HTML for live-URL dashboards** — does it bake in the last response, or keep polling on open? Two output modes: *Self-contained HTML* (snapshot-baked) and *HTML + live URL* (polls on open). Already reflected in the Export modal.

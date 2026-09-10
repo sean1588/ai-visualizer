@@ -169,12 +169,17 @@
   .w-6  { grid-column: span 6; }
   .w-4  { grid-column: span 4; }
   .w-3  { grid-column: span 3; }
-  .w-hd { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 12px; border-bottom: 1px solid var(--rule-soft); margin-bottom: 16px; }
+  .w-hd { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--rule-soft); margin-bottom: 16px; }
   .w-hd h3 { font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 17px; margin: 0; letter-spacing: -0.005em; }
   .w-hd .meta { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-mute); }
+  .w-actions { display: flex; justify-content: flex-end; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .widget-action, .assumption-chip { border: 1px solid var(--rule-soft); background: var(--bg); color: var(--fg-mute); border-radius: 999px; padding: 3px 7px; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.04em; text-transform: uppercase; cursor: pointer; white-space: nowrap; }
+  .widget-action:hover, .assumption-chip:hover, .widget-action:focus-visible, .assumption-chip:focus-visible { border-color: var(--rule); color: var(--fg); outline: none; }
 
   /* kpi */
   .w-kpi { padding: 22px; }
+  .kpi-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+  .kpi-top .w-actions { max-width: 75%; }
   .w-kpi .label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-mute); margin-bottom: 8px; }
   .w-kpi .value { font-family: var(--font-display); font-weight: 400; font-size: 36px; letter-spacing: -0.025em; line-height: 1; }
   .w-kpi .delta { font-family: var(--font-mono); font-size: 11px; color: var(--accent-2); margin-top: 8px; letter-spacing: 0.02em; }
@@ -186,6 +191,19 @@
   .axis-line { stroke: var(--rule-soft); stroke-width: 1; }
   .axis-tick { font-family: var(--font-mono); font-size: 9.5px; fill: var(--fg-mute); letter-spacing: 0.04em; }
   .grid-line { stroke: var(--rule-soft); stroke-width: 0.5; stroke-dasharray: 2 3; }
+  .chart-hit { cursor: pointer; transition: opacity 0.12s, stroke-width 0.12s; }
+  .chart-hit:hover, .chart-hit:focus { opacity: 1; stroke: var(--fg); stroke-width: 2; outline: none; }
+  .donut-body { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+  .donut-legend, .sl { list-style: none; padding: 0; margin: 0; flex: 1; min-width: 180px; display: grid; gap: 8px; }
+  .legend-button { width: 100%; display: grid; grid-template-columns: 10px minmax(70px, 1fr) auto auto; align-items: center; gap: 8px; padding: 4px; border: 0; background: transparent; color: var(--fg); text-align: left; cursor: pointer; }
+  .legend-button:hover, .legend-button:focus-visible { background: var(--bg-soft); outline: 1px solid var(--rule-soft); }
+  .legend-button .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .legend-button .v, .legend-button .p, .sl-val { font-family: var(--font-mono); font-size: 10px; color: var(--fg-mute); }
+  .sl-row { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+  .statlist-key { border: 0; background: transparent; color: var(--fg); padding: 0; font: inherit; cursor: pointer; text-align: left; }
+  .statlist-key:hover, .statlist-key:focus-visible { color: var(--accent); outline: none; text-decoration: underline; }
+  .sl-bar { height: 4px; background: var(--bg-soft); }
+  .sl-fill { height: 100%; background: var(--accent-2); }
 
   /* table */
   .w-table table { width: 100%; border-collapse: collapse; }
@@ -198,6 +216,28 @@
   .badge.ok { background: rgba(74,102,81,0.12); color: var(--accent-2); border-color: var(--accent-2); }
   .badge.warn { background: rgba(176,138,74,0.12); color: var(--accent-3); border-color: var(--accent-3); }
   .badge.bad { background: rgba(138,51,36,0.10); color: var(--accent); border-color: var(--accent); }
+
+  .mise-dialog { width: min(760px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 32px)); padding: 0; border: 1.5px solid var(--rule); background: var(--bg); color: var(--fg); box-shadow: 8px 8px 0 var(--rule); }
+  .mise-dialog::backdrop { background: rgba(31,28,22,0.42); }
+  .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 20px; border-bottom: 1px solid var(--rule); background: var(--bg-soft); }
+  .dialog-head h2 { margin: 2px 0 0; font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 24px; }
+  .dialog-close { border: 0; background: transparent; color: var(--fg-mute); font-size: 22px; cursor: pointer; }
+  .dialog-body { padding: 20px; }
+  .dialog-copy { color: var(--fg-mute); margin: 0 0 18px; }
+  .assumptions-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .assumption-field { display: grid; gap: 5px; }
+  .assumption-field span { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-mute); }
+  .assumption-field select, .assumption-field input, .inspector-search { width: 100%; padding: 9px 10px; border: 1px solid var(--rule-soft); background: var(--bg-elev); color: var(--fg); font: inherit; }
+  .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+  .dialog-error { color: var(--accent); font-family: var(--font-mono); font-size: 11px; min-height: 1.5em; margin-top: 10px; }
+  .inspector-toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) auto; gap: 12px; align-items: center; margin-bottom: 12px; }
+  .inspector-table-wrap { overflow: auto; max-height: min(520px, 60vh); border: 1px solid var(--rule-soft); }
+  .inspector-table { width: 100%; border-collapse: collapse; }
+  .inspector-table th { position: sticky; top: 0; z-index: 1; padding: 0; background: var(--bg-soft); border-bottom: 1px solid var(--rule); }
+  .inspector-table th button { width: 100%; padding: 9px 8px; border: 0; background: transparent; color: var(--fg); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; text-align: left; cursor: pointer; white-space: nowrap; }
+  .inspector-table th.num button { text-align: right; }
+  .inspector-table td { padding: 8px; border-bottom: 1px dashed var(--rule-soft); white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+  .inspector-table td.num { text-align: right; font-family: var(--font-mono); font-size: 12px; }
 
   /* observations widget */
   .w-obs { background: var(--bg-soft); border-color: var(--rule); }
@@ -350,6 +390,10 @@
 
     /* tighten widget headers */
     .w-hd h3 { font-size: 15px; }
+    .w-hd { flex-direction: column; }
+    .w-actions { justify-content: flex-start; }
+    .kpi-top { flex-direction: column; }
+    .kpi-top .w-actions { max-width: 100%; }
     .kpi-value { font-size: 36px; }
     .obs-item { grid-template-columns: 28px 1fr; gap: 12px; }
     .w-table { overflow-x: auto; }
@@ -382,6 +426,8 @@
 
     /* sample chips wrap nicely */
     .empty-foot { flex-direction: column; align-items: flex-start; gap: 14px; }
+    .assumptions-grid { grid-template-columns: 1fr; }
+    .mise-dialog { width: calc(100vw - 20px); max-height: calc(100vh - 20px); }
   }
 
   /* Tighter topbar at the very narrow breakpoint */
@@ -413,7 +459,7 @@
     <div class="empty-card">
       <div class="empty-eyebrow"><span class="eyebrow eyebrow-accent">A new dashboard</span></div>
       <h1>Drop a file. Or paste your data.</h1>
-      <p class="lede">Mise reads your schema, samples a few rows for inference, and renders the dashboard right here in your browser. Nothing is stored.</p>
+      <p class="lede">Mise profiles your data locally, sends computed facts for layout, and renders the dashboard right here in your browser. Raw rows are not sent.</p>
 
       <div id="drop" class="drop">
         <div class="drop-icon">
@@ -447,7 +493,7 @@
         <div class="drop-actions">
           <button id="render-btn" class="btn btn-primary btn-lg">Render dashboard →</button>
         </div>
-        <div class="drop-meta">Schema inferred locally · sample rows sent once for inference · never stored</div>
+        <div class="drop-meta">Profile computed locally · aggregate facts sent once for inference · raw rows stay here</div>
         <div id="pending-recipe" class="pending-recipe" hidden></div>
         <div id="err" class="err" style="display:none;"></div>
       </div>
@@ -487,7 +533,7 @@
     <div class="loading-left">
       <div class="eyebrow eyebrow-accent" style="margin-bottom:14px;">— Reading the data —</div>
       <h2 id="loading-title">We're getting to know your data.</h2>
-      <p style="color:var(--fg-mute);font-size:15px;margin:0 0 24px;">Schema first, layout second. We send a small sample once, decide what to render, then forget it.</p>
+      <p style="color:var(--fg-mute);font-size:15px;margin:0 0 24px;">Profile first, layout second. We compute facts across the complete dataset, send those once, then forget them.</p>
       <div id="loading-file" class="file">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#1f1c16" stroke-width="1.4"><rect x="2" y="1" width="10" height="12"/><path d="M5 5h4M5 7h4M5 9h2"/></svg>
         <span id="loading-file-text">data · — rows · — cols</span>
@@ -520,6 +566,46 @@
   </div>
   <div id="dash-grid" class="dash-grid"></div>
 </section>
+
+<dialog id="assumptions-dialog" class="mise-dialog">
+  <form id="assumptions-form" method="dialog">
+    <div class="dialog-head">
+      <div>
+        <div class="eyebrow eyebrow-accent">Widget assumptions</div>
+        <h2 id="assumptions-title">Widget</h2>
+      </div>
+      <button id="assumptions-cancel" class="dialog-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body">
+      <p class="dialog-copy">These controls update the recipe locally. The Chef is not called.</p>
+      <div id="assumptions-fields" class="assumptions-grid"></div>
+      <div id="assumptions-error" class="dialog-error" role="alert"></div>
+      <div class="dialog-actions">
+        <button id="assumptions-secondary-cancel" type="button" class="btn btn-ghost">Cancel</button>
+        <button type="submit" class="btn btn-primary">Apply assumptions</button>
+      </div>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="inspector-dialog" class="mise-dialog">
+  <div class="dialog-head">
+    <div>
+      <div class="eyebrow eyebrow-accent">Contributing data</div>
+      <h2 id="inspector-title">Source rows</h2>
+    </div>
+    <button id="inspector-close" class="dialog-close" type="button" aria-label="Close">×</button>
+  </div>
+  <div class="dialog-body">
+    <div class="inspector-toolbar">
+      <input id="inspector-search" class="inspector-search" type="search" aria-label="Filter contributing rows" placeholder="Filter these rows…" />
+      <span id="inspector-meta" class="eyebrow"></span>
+    </div>
+    <div class="inspector-table-wrap">
+      <table id="inspector-table" class="inspector-table"></table>
+    </div>
+  </div>
+</dialog>
 
 <!-- ─── The Chef · chat-to-edit ─── -->
 <button id="chef-fab" class="chef-fab" type="button">
