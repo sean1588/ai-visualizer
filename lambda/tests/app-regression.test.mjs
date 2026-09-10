@@ -841,15 +841,25 @@ test("one row per date×segment is a weekly series, not 36 raw points", async ()
 test("compact numbers never print 1000B for just-under-a-trillion values", async () => {
   await withPage(async page => {
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
-    const formatted = await page.evaluate(() => ({
-      justUnderT: fmtCompact(999999999999),
-      trillion: fmtCompact(1e12),
-      billion: fmtCompact(1.5e9),
-    }));
+    const formatted = await page.evaluate(() => {
+      state.rows = [{ nps: 61, ratio: 0.61 }, { nps: 70, ratio: 0.7 }];
+      state.schema = inferSchema(state.rows);
+      return {
+        justUnderT: fmtCompact(999999999999),
+        trillion: fmtCompact(1e12),
+        billion: fmtCompact(1.5e9),
+        wholePercent: fmtCompact(61, "nps", "percent"),
+        ratioPercent: fmtCompact(0.61, "ratio", "percent"),
+        negativeCurrency: fmtCompact(-1200, "revenue_usd", "currency"),
+      };
+    });
     assert.doesNotMatch(formatted.justUnderT, /1000\s*[Bb]/);
     assert.match(formatted.justUnderT, /T|999/);
     assert.match(formatted.trillion, /T/);
     assert.equal(formatted.billion, "1.5B");
+    assert.equal(formatted.wholePercent, "61%");
+    assert.equal(formatted.ratioPercent, "61%");
+    assert.equal(formatted.negativeCurrency, "-$1.2k");
   });
 });
 

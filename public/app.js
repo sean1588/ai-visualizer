@@ -819,6 +819,14 @@ function columnPrefersPercent(colName) {
 function columnPrefersCurrency(colName) {
   return !!(colName && /(^|[._])(usd|amount|revenue|mrr|arr|price|cost|fee|fees|payout|net|gross)([._]|$)/i.test(colName));
 }
+function columnUsesRatioScale(colName) {
+  if (columnPrefersPercent(colName)) return true;
+  const values = (state.rows || []).map(row => row[colName]).filter(value => typeof value === 'number' && Number.isFinite(value));
+  return values.length > 0 && values.every(value => Math.abs(value) <= 2);
+}
+function withCurrencySymbol(value) {
+  return value.startsWith('-') ? `-$${value.slice(1)}` : `$${value}`;
+}
 function fmtScaled(n, div, suffix) {
   return (n / div).toFixed(1).replace(/\.0$/, '') + suffix;
 }
@@ -827,7 +835,7 @@ function fmtCompact(n, colName, requestedFormat = 'auto') {
   const format = normalizeFormat(requestedFormat);
   const isPercent = format === 'percent' || (format === 'auto' && (columnPrefersPercent(colName) || (colName && /(pct|percent|churn|nrr|crr|rate|ratio)/i.test(colName) && n >= 0 && n <= 2)));
   if (isPercent) {
-    const pct = n * 100;
+    const pct = n * (columnUsesRatioScale(colName) || (!state.rows && Math.abs(n) <= 2) ? 100 : 1);
     const digits = Math.abs(pct) >= 10 ? 1 : 2;
     return pct.toFixed(digits).replace(/\.0+$/, '') + '%';
   }
@@ -841,7 +849,7 @@ function fmtCompact(n, colName, requestedFormat = 'auto') {
   else if (Number.isInteger(n)) value = String(n);
   else value = n.toFixed(2);
   const isCurrency = format === 'currency' || (format === 'auto' && columnPrefersCurrency(colName));
-  return isCurrency ? `$${value}` : value;
+  return isCurrency ? withCurrencySymbol(value) : value;
 }
 function fmtFull(n, colName, requestedFormat = 'auto') {
   if (isPlainObject(n) || Array.isArray(n)) return n;
@@ -852,7 +860,7 @@ function fmtFull(n, colName, requestedFormat = 'auto') {
   }
   const value = Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
   const isCurrency = format === 'currency' || (format === 'auto' && columnPrefersCurrency(colName));
-  return isCurrency ? `$${value}` : value;
+  return isCurrency ? withCurrencySymbol(value) : value;
 }
 
 function chromePillLabel() {
