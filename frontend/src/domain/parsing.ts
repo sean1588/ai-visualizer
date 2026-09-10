@@ -52,7 +52,7 @@ export function flattenRows(rows: readonly unknown[]): Row[] {
   return rows.map(row => {
     const flat = flattenOneLevel(row);
     const coerced: Row = {};
-    for (const [key, value] of Object.entries(Object(flat) as Record<string, unknown>)) {
+    for (const [key, value] of Object.entries(flat as Record<string, unknown>)) {
       coerced[key] = coerceCell(value) as Row[string];
     }
     return coerced;
