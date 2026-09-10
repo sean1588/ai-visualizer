@@ -33,6 +33,12 @@ def ratio(value):
     return round(clamp(value, 0, 1), 4)
 
 
+def csv_value(value):
+    if isinstance(value, bool):
+        return str(value).lower()
+    return value
+
+
 def write_dataset(output_dir, name, fields, rows):
     csv_path = output_dir / f"{name}.csv"
     json_path = output_dir / f"{name}.json"
@@ -46,7 +52,7 @@ def write_dataset(output_dir, name, fields, rows):
         for row in rows:
             if count:
                 json_file.write(",\n")
-            writer.writerow(row)
+            writer.writerow({key: csv_value(value) for key, value in row.items()})
             json_file.write("  ")
             json.dump(row, json_file, ensure_ascii=False, separators=(",", ":"))
             count += 1

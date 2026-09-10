@@ -16,7 +16,7 @@
         "csv": {
           "path": "product-usage-weekly.csv",
           "bytes": 1488214,
-          "sha256": "bacdd8ededf7d0bc0ced9f8a3fbab3f19c40bbfd0cfd5128f48ab85577fe5f20"
+          "sha256": "dbec92d51b7e2b234bd4b4ad06bea3a89d42b47987d7054b4844fd7aa8062051"
         },
         "json": {
           "path": "product-usage-weekly.json",
@@ -40,7 +40,7 @@
         "csv": {
           "path": "ecommerce-orders.csv",
           "bytes": 3668189,
-          "sha256": "f3b4593c192081d0bd0f486b42a7cdc5f68573710d582e90cc2987060146b0df"
+          "sha256": "a8cea9d812417be99b32b0406b6d205e549fb1e2dbb7ed6e6e579422fa9db919"
         },
         "json": {
           "path": "ecommerce-orders.json",
@@ -64,7 +64,7 @@
         "csv": {
           "path": "support-tickets.csv",
           "bytes": 1919394,
-          "sha256": "ad239c079d72487de00dab3f02049209af046efdcf5df79f85f73b2e10d18bf3"
+          "sha256": "7b1266d8d3d8ec45d803b87ec2289f5b21ccff860a11a7d61a1d925381e6e647"
         },
         "json": {
           "path": "support-tickets.json",
