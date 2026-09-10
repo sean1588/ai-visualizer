@@ -1,0 +1,14 @@
+{
+  "name": "Mise (ai-visualizer)",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "app",
+      "command": "python3 -m http.server 8080 --directory public",
+      "description": "Serves the Mise web app (public/) at http://localhost:8080. The /api/cook and /api/fetch-data endpoints are backed by the Lambda in production; locally the app degrades gracefully to its deterministic dashboard planner."
+    }
+  ],
+  "ports": [
+    { "name": "app", "port": 8080 }
+  ]
+}
