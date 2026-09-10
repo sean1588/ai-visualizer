@@ -821,7 +821,7 @@ test("one row per date×segment is a weekly series, not 36 raw points", async ()
 
     const currentMrr = info.kpis.find(k => /current mrr/i.test(k.label));
     assert.ok(currentMrr, "CURRENT MRR kpi is present");
-    assert.equal(currentMrr.value, "905.7k");
+    assert.equal(currentMrr.value, "$905.7k");
     assert.doesNotMatch(currentMrr.value, /83\.1k/);
     assert.doesNotMatch(currentMrr.delta, /66\.9%/);
     const expectedDelta = ((905700 - 894728) / 894728) * 100;
