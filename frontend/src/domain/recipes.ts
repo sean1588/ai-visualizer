@@ -586,7 +586,7 @@ export function repairCanonicalWidgets(
     return {
       ...match,
       ...record,
-      fields: record.fields || match.fields,
+      fields: record.fields || ('fields' in match ? match.fields : undefined),
     };
   });
 }
