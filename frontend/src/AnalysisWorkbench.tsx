@@ -93,7 +93,7 @@ export default function AnalysisWorkbench({
   const goalWidgets = useMemo(() => recipe ? kpiGoalsFromRecipe(recipe) : [], [recipe]);
   const goalEvaluations = useMemo(() => evaluateKpiGoals(kpiGoals, rows, schema), [kpiGoals, rows, schema]);
   const selectedColumn = schema.find(column => column.name === columnName);
-  const operators = filterOperators(selectedColumn);
+  const operators = useMemo(() => filterOperators(selectedColumn), [selectedColumn]);
 
   useEffect(() => {
     if (open) setNotesDraft(dashboardNotes);
@@ -240,7 +240,7 @@ export default function AnalysisWorkbench({
               <h3>Move the whole working plate.</h3>
               <p>Backups contain the rows, recipe, filters, goals, notes, source settings, and theme. Nothing is uploaded.</p>
               <div className="dialog-actions"><button id="export-dashboard-bundle" type="button" className="btn btn-ghost" onClick={onExport}>Download backup</button><button id="import-dashboard-bundle" type="button" className="btn btn-ghost" onClick={() => importRef.current?.click()}>Restore backup</button></div>
-              <input ref={importRef} type="file" accept=".mise.json,.json,application/json" hidden onChange={event => {
+              <input id="dashboard-bundle-input" ref={importRef} type="file" accept=".mise.json,.json,application/json" hidden onChange={event => {
                 const file = event.target.files?.[0];
                 if (!file) return;
                 const reader = new FileReader();

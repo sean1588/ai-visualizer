@@ -94,6 +94,24 @@ const AGGREGATE_PLAN = {
   ],
 };
 
+const WORKBENCH_ROWS = [
+  { date: "2026-01-01", segment: "Free", revenue: 10, orders: 2, customer_email: "ada@example.com" },
+  { date: "2026-02-01", segment: "Pro", revenue: 20, orders: 4, customer_email: "lin@example.com" },
+  { date: "2026-03-01", segment: "Pro", revenue: 30, orders: 6, customer_email: "sam@example.com" },
+  { date: "2026-04-01", segment: "Team", revenue: 40, orders: 8, customer_email: "jo@example.com" },
+  { date: "2026-05-01", segment: "Pro", revenue: 50, orders: 10, customer_email: "max@example.com" },
+];
+
+const WORKBENCH_PLAN = {
+  title: "Segment Workbench",
+  widgets: [
+    { type: "kpi", span: 3, title: "Revenue", fields: { metric: "revenue", aggregate: "sum", format: "number" } },
+    { type: "kpi", span: 3, title: "Orders", fields: { metric: "orders", aggregate: "sum", format: "number" } },
+    { type: "bar", span: 6, title: "Revenue by segment", fields: { x: "segment", y: "revenue", aggregate: "sum", format: "number" } },
+    { type: "table", span: 12, title: "Rows", fields: { limit: 10, sort: "revenue", order: "desc" } },
+  ],
+};
+
 const BARLEY = [
   { yield: 27.0, variety: "Manchuria", year: 1931, site: "University Farm" },
   { yield: 43.1, variety: "Manchuria", year: 1932, site: "University Farm" },
@@ -725,6 +743,80 @@ test("brief, recipe inspector, and themes remain traceable and local", async () 
     await page.getByText("SaaS Growth Review").first().click();
     assert.equal(await page.locator("#theme-picker").inputValue(), "marketing");
   });
+});
+
+test("analysis workbench keeps ten browser-local enhancements cohesive and persistent", async () => {
+  await withPage(async page => {
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, WORKBENCH_PLAN);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#paste").fill(JSON.stringify(WORKBENCH_ROWS));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    await page.locator("#open-workbench").click();
+    await page.waitForSelector("#analysis-workbench[open]");
+    const workbench = page.locator("#analysis-workbench");
+    assert.match(await workbench.innerText(), /Explore without changing the recipe/i);
+
+    await workbench.locator("#focus-filter-form select[name=column]").selectOption("segment");
+    await workbench.locator("#focus-filter-form select[name=operator]").selectOption("equals");
+    await workbench.locator("#focus-filter-form input[name=value]").fill("Pro");
+    await workbench.locator("#focus-filter-form button[type=submit]").click();
+    await page.waitForFunction(() => document.querySelector("#focus-summary")?.textContent?.includes("3 of 5 rows"));
+    assert.match(await page.locator("#focus-summary").innerText(), /1 active filter/i);
+
+    await workbench.locator("#save-view-form input[name=name]").fill("Pro accounts");
+    await workbench.locator("#save-view-form button[type=submit]").click();
+    assert.match(await workbench.locator("#saved-view-list").innerText(), /Pro accounts/i);
+
+    await workbench.getByRole("button", { name: "Goals" }).click();
+    await workbench.locator("#kpi-goal-form input[name=target]").fill("45");
+    await workbench.locator("#kpi-goal-form button[type=submit]").click();
+    assert.match(await workbench.locator("#kpi-goal-list").innerText(), /Goal met/i);
+    assert.equal(await page.locator(".w-kpi .kpi-goal.met").count(), 1);
+
+    await workbench.getByRole("button", { name: "Discover" }).click();
+    assert.match(await workbench.locator("#column-profile-list").innerText(), /Revenue/i);
+    assert.match(await workbench.locator("#correlation-list").innerText(), /Revenue ↔ Orders/i);
+    assert.match(await workbench.locator("#privacy-finding-list").innerText(), /Customer email/i);
+    assert.ok(await workbench.locator("#follow-up-list button").count() >= 3);
+    await workbench.locator("#follow-up-list button").first().click();
+    await page.waitForSelector("#chef-panel.is-open");
+    assert.match(await page.locator("#chef-input").inputValue(), /Emphasize the trend/i);
+    await page.locator("#chef-close").click();
+
+    await page.locator("#open-workbench").click();
+    await workbench.getByRole("button", { name: "Notes" }).click();
+    await workbench.locator("#dashboard-notes").fill("Review Pro growth with finance.");
+    await workbench.getByRole("button", { name: "Save context" }).click();
+    assert.match(await page.locator("#dashboard-context").innerText(), /Review Pro growth with finance/i);
+
+    const downloadPromise = page.waitForEvent("download");
+    await workbench.locator("#export-dashboard-bundle").click();
+    const download = await downloadPromise;
+    assert.match(download.suggestedFilename(), /\.mise\.json$/);
+    const downloadPath = await download.path();
+    const backup = JSON.parse(readFileSync(downloadPath, "utf8"));
+    assert.equal(backup.kind, "mise-dashboard-bundle");
+    assert.equal(backup.dashboard.savedViews[0].name, "Pro accounts");
+    assert.equal(backup.dashboard.dashboardNotes, "Review Pro growth with finance.");
+
+    await workbench.locator("#dashboard-bundle-input").setInputFiles(downloadPath);
+    await page.waitForFunction(() => !document.querySelector("#analysis-workbench")?.hasAttribute("open"));
+    assert.match(await page.locator("#dash-title").innerText(), /Segment Workbench/i);
+
+    await page.locator("#presentation-mode").click();
+    assert.equal(await page.locator(".top").evaluate(element => getComputedStyle(element).display), "none");
+    assert.ok(await page.locator("#exit-presentation").isVisible());
+    await page.locator("#exit-presentation").click();
+
+    await page.reload({ waitUntil: "networkidle" });
+    await page.getByText("Segment Workbench").first().click();
+    await page.locator("#open-workbench").click();
+    await workbench.waitFor({ state: "visible" });
+    assert.match(await workbench.locator("#saved-view-list").innerText(), /Pro accounts/i);
+    assert.match(await page.locator("#dashboard-context").innerText(), /Review Pro growth with finance/i);
+  }, { allowConsole: /AI response did not validate, falling back/ });
 });
 
 test("public source conveniences and while-open thresholds evaluate after refresh", async () => {
