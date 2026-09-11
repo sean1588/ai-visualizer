@@ -1,3 +1,5 @@
+import { createContext, useContext } from 'react';
+
 import {
   aggregateBy,
   chooseGroupMode,
@@ -35,7 +37,19 @@ interface WidgetGridProps {
   onRetry: () => void;
   onExportTable: (widget: TableWidget) => void;
   onCopyTable: (widget: TableWidget) => void;
+  onEditWidget: (index: number, action: WidgetEditAction) => void;
+  onChefWidget: (index: number) => void;
 }
+
+export type WidgetEditAction = 'move-up' | 'move-down' | 'resize' | 'duplicate' | 'remove';
+
+interface WidgetEditor {
+  count: number;
+  onEdit: (index: number, action: WidgetEditAction) => void;
+  onChef: (index: number) => void;
+}
+
+const WidgetEditorContext = createContext<WidgetEditor | null>(null);
 
 function assumptionText(widget: RenderedWidget): string {
   if (widget.type === 'kpi') return `${widget.aggregate || 'last'} · ${widget.metric} · ${widget.format || 'auto'}`;
@@ -73,6 +87,7 @@ function WidgetActions({
   onInspect: (widget: RenderedWidget, selectedValue: unknown | null) => void;
 }) {
   const assumptions = assumptionText(widget);
+  const editor = useContext(WidgetEditorContext);
   return (
     <div className="w-actions">
       {meta && <span className="meta">{meta}</span>}
@@ -91,6 +106,25 @@ function WidgetActions({
         >
           {assumptions}
         </button>
+      )}
+      {widget.rationale && (
+        <details className="widget-rationale">
+          <summary>Why this?</summary>
+          <p>{widget.rationale}</p>
+        </details>
+      )}
+      {editor && (
+        <details className="widget-edit">
+          <summary>Edit</summary>
+          <div className="widget-edit-menu">
+            <button type="button" disabled={index === 0} onClick={() => editor.onEdit(index, 'move-up')}>Move earlier</button>
+            <button type="button" disabled={index === editor.count - 1} onClick={() => editor.onEdit(index, 'move-down')}>Move later</button>
+            <button type="button" disabled={widget.type === 'table' || widget.type === 'observations'} onClick={() => editor.onEdit(index, 'resize')}>Resize · {widget.span}/12</button>
+            <button type="button" onClick={() => editor.onEdit(index, 'duplicate')}>Duplicate</button>
+            <button type="button" disabled={editor.count === 1} onClick={() => editor.onEdit(index, 'remove')}>Remove</button>
+            <button type="button" onClick={() => editor.onChef(index)}>Ask the Chef</button>
+          </div>
+        </details>
       )}
     </div>
   );
@@ -594,10 +628,13 @@ export default function WidgetGrid({
   onRetry,
   onExportTable,
   onCopyTable,
+  onEditWidget,
+  onChefWidget,
 }: WidgetGridProps) {
   const comparisonsByWidget = new Map(comparisons.map(comparison => [comparison.fingerprint, comparison]));
   return (
-    <div id="dash-grid" className="dash-grid">
+    <WidgetEditorContext.Provider value={{ count: recipe.widgets.length, onEdit: onEditWidget, onChef: onChefWidget }}>
+      <div id="dash-grid" className="dash-grid">
       {recipe.fallback && (
         <div className="w w-banner" style={{ gridColumn: 'span 12' }}>
           <span className="banner-eyebrow">⚠ Couldn’t reach the AI</span>
@@ -618,6 +655,7 @@ export default function WidgetGrid({
         else if (widget.type === 'table') content = <TableCard widget={widget} index={index} rows={rows} schema={schema} fallback={!!recipe.fallback} onAssumptions={onAssumptions} onInspect={onInspect} onExport={onExportTable} onCopy={onCopyTable} />;
         return <div key={`${fingerprint}-${index}`} data-fp={fingerprint} className={className} style={{ display: 'contents' }}>{content}</div>;
       })}
-    </div>
+      </div>
+    </WidgetEditorContext.Provider>
   );
 }

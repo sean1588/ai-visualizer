@@ -23,6 +23,12 @@ export interface ChefMessage {
   undone?: boolean;
 }
 
+export interface RecipeRevision {
+  recipe: DashboardRecipe;
+  label: string;
+  at: number;
+}
+
 export interface InspectorState {
   widget: RenderedWidget;
   rows: Row[];
@@ -56,6 +62,9 @@ export interface AppState {
   chefOpen: boolean;
   chefThinking: boolean;
   chefHistory: ChefMessage[];
+  chefWidgetIndex: number | null;
+  recipeHistory: RecipeRevision[];
+  recipeHistoryIndex: number;
   changedWidgets: Set<string>;
   assumptionsWidgetIndex: number | null;
   inspector: InspectorState | null;
@@ -97,6 +106,9 @@ export function createInitialState(recents: RecentDashboard[] = []): AppState {
     chefOpen: false,
     chefThinking: false,
     chefHistory: [],
+    chefWidgetIndex: null,
+    recipeHistory: [],
+    recipeHistoryIndex: -1,
     changedWidgets: new Set(),
     assumptionsWidgetIndex: null,
     inspector: null,

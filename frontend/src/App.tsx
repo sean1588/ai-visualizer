@@ -48,11 +48,12 @@ import {
   type TableWidget,
 } from './domain';
 import DataHealthDialog from './DataHealth';
+import ExampleGallery from './ExampleGallery';
+import { EXAMPLE_PLATES, type ExamplePlate } from './examples';
 import { buildChefPrompt, buildPrompt } from './prompts';
-import { SAMPLES, SAMPLE_TITLES } from './samples';
 import { complete, fetchRemoteData } from './services';
 import { buildRecipeLink, buildStandaloneHtml, decodeRecipeFragment } from './sharing';
-import { appReducer, createInitialState, initialSteps, type AppState, type ChefMessage, type LoadingStep } from './state';
+import { appReducer, createInitialState, initialSteps, type AppState, type ChefMessage, type LoadingStep, type RecipeRevision } from './state';
 import { clearRecents, loadRecents, migrateLegacyStorage, relativeTime, saveRecent, type RecentDashboard } from './storage';
 import WidgetGrid from './WidgetGrid';
 
@@ -68,6 +69,20 @@ const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve
 
 function cloneRecipe(recipe: DashboardRecipe): DashboardRecipe {
   return structuredClone(recipe);
+}
+
+function recipeRevision(recipe: DashboardRecipe, label: string): RecipeRevision {
+  return { recipe: cloneRecipe(recipe), label, at: Date.now() };
+}
+
+function appendRecipeHistory(
+  state: AppState,
+  recipe: DashboardRecipe,
+  label: string,
+): Pick<AppState, 'recipeHistory' | 'recipeHistoryIndex'> {
+  const previous = state.recipeHistory.slice(0, state.recipeHistoryIndex + 1);
+  const recipeHistory = [...previous, recipeRevision(recipe, label)].slice(-20);
+  return { recipeHistory, recipeHistoryIndex: recipeHistory.length - 1 };
 }
 
 function stampAudit(entries: readonly DataAuditEntry[] = [], at: number = Date.now()): DataAuditEntry[] {
@@ -478,6 +493,9 @@ function App() {
           error: `Shared recipe ready: ${linkedRecipe.title || 'untitled'}. Add CSV or JSON data to render it without another AI call.`,
           chefOpen: false,
           chefHistory: [],
+          chefWidgetIndex: null,
+          recipeHistory: [],
+          recipeHistoryIndex: -1,
         },
       });
     };
@@ -578,6 +596,7 @@ function App() {
         error: '',
         chefHistory: [],
         chefOpen: false,
+        chefWidgetIndex: null,
         loadingSteps: { ...initialSteps },
         loadingLabel: `data · ${rows.length} rows · ${Object.keys(rows[0]).length} cols`,
       },
@@ -619,12 +638,27 @@ function App() {
         pendingRecipe: null,
         id: null,
         changedWidgets: new Set(),
+        recipeHistory: [recipeRevision(recipe, 'Initial dashboard')],
+        recipeHistoryIndex: 0,
         statusMessage: null,
         statusError: false,
       },
     });
     persistSnapshot({ rows, schema, recipe, dataSource, parseHealth, schemaOverrides, dataAudit, previousSnapshot: null, updatedAt });
   }, [flashStatus, notes, pasteText, persistSnapshot]);
+
+  const openExample = useCallback((example: ExamplePlate) => {
+    const text = JSON.stringify(example.rows, null, 2);
+    setPasteText(text);
+    setNotes(example.noteExample);
+    dispatch({ type: 'patch', value: { title: example.title } });
+    void runPipeline(text, null, { recipe: example.recipe, notes: example.noteExample });
+  }, [runPipeline]);
+
+  const useExampleNote = useCallback((note: string) => {
+    setNotes(note);
+    document.getElementById('notes')?.focus();
+  }, []);
 
   const ingestFile = useCallback((file: File) => {
     setFileName(file.name);
@@ -659,12 +693,14 @@ function App() {
     return () => window.removeEventListener('paste', handlePaste);
   }, []);
 
-  const retryAi = useCallback(async () => {
+  const commitRecipeChange = useCallback((
+    recipe: DashboardRecipe,
+    label: string,
+    value: Partial<AppState> = {},
+  ) => {
     const current = stateRef.current;
-    if (!current.rows.length || !current.schema.length) return;
-    flashStatus('Asking the model again…');
-    const recipe = await planRecipe(current.rows, current.schema, current.notes);
-    dispatch({ type: 'patch', value: { recipe, stage: 'dash' } });
+    const history = appendRecipeHistory(current, recipe, label);
+    dispatch({ type: 'patch', value: { ...value, recipe, ...history } });
     persistSnapshot({
       rows: current.rows,
       schema: current.schema,
@@ -675,7 +711,15 @@ function App() {
       updatedAt: current.updatedAt || Date.now(),
       id: current.id,
     });
-  }, [flashStatus, persistSnapshot]);
+  }, [persistSnapshot]);
+
+  const retryAi = useCallback(async () => {
+    const current = stateRef.current;
+    if (!current.rows.length || !current.schema.length) return;
+    flashStatus('Asking the model again…');
+    const recipe = await planRecipe(current.rows, current.schema, current.notes);
+    commitRecipeChange(recipe, 'AI layout retry', { stage: 'dash' });
+  }, [commitRecipeChange, flashStatus]);
 
   const applyDataUpdate = useCallback((rawText: string, dataSource: DataSource | null) => {
     const current = stateRef.current;
@@ -715,6 +759,10 @@ function App() {
         updatedAt,
         statusMessage: null,
         statusError: false,
+        chefHistory: [],
+        chefWidgetIndex: null,
+        recipeHistory: [recipeRevision(recipe, 'Data replaced')],
+        recipeHistoryIndex: 0,
       },
     });
     persistSnapshot({
@@ -901,7 +949,9 @@ function App() {
       const clone = dashboard.cloneNode(true) as HTMLElement;
       clone.classList.add('is-active');
       clone.querySelector('#recurring-report')?.remove();
-      clone.querySelectorAll('.widget-action,.assumption-chip,.table-export-btn,.retry-ai-btn,#data-health-btn').forEach(element => element.remove());
+      clone.querySelector('.dash-share-actions')?.remove();
+      clone.querySelector('.recipe-history')?.remove();
+      clone.querySelectorAll('.widget-action,.assumption-chip,.widget-edit,.table-export-btn,.retry-ai-btn,#data-health-btn').forEach(element => element.remove());
       const html = buildStandaloneHtml({
         title: current.recipe.title,
         dashboardHtml: clone.outerHTML,
@@ -974,7 +1024,65 @@ function App() {
     const index = current.assumptionsWidgetIndex;
     if (!current.recipe || index === null) return;
     const recipe = { ...current.recipe, widgets: current.recipe.widgets.map((candidate, candidateIndex) => candidateIndex === index ? widget : candidate) };
-    dispatch({ type: 'patch', value: { recipe, assumptionsWidgetIndex: null } });
+    commitRecipeChange(recipe, `Updated ${widget.title || ('label' in widget ? widget.label : humanize(widget.type))}`, { assumptionsWidgetIndex: null });
+    flashStatus('Assumptions updated');
+  }, [commitRecipeChange, flashStatus]);
+
+  const editWidget = useCallback((index: number, action: 'move-up' | 'move-down' | 'resize' | 'duplicate' | 'remove') => {
+    const current = stateRef.current;
+    if (!current.recipe) return;
+    const widgets = [...current.recipe.widgets];
+    const widget = widgets[index];
+    if (!widget) return;
+    let label = `Edited ${widget.title || ('label' in widget ? widget.label : humanize(widget.type))}`;
+    if (action === 'move-up' || action === 'move-down') {
+      const destination = index + (action === 'move-up' ? -1 : 1);
+      if (destination < 0 || destination >= widgets.length) return;
+      [widgets[index], widgets[destination]] = [widgets[destination], widgets[index]];
+      label = `Moved ${widget.title || ('label' in widget ? widget.label : humanize(widget.type))}`;
+    } else if (action === 'resize') {
+      if (widget.type === 'table' || widget.type === 'observations') return;
+      const spans = [3, 4, 6, 8, 12] as const;
+      const spanIndex = spans.indexOf(widget.span as typeof spans[number]);
+      const span = spans[(spanIndex + 1) % spans.length];
+      widgets[index] = { ...widget, span } as RenderedWidget;
+      label = `Resized ${widget.title || ('label' in widget ? widget.label : humanize(widget.type))} to ${span}/12`;
+    } else if (action === 'duplicate') {
+      const duplicate = cloneRecipe({ title: '', widgets: [widget] }).widgets[0];
+      const title = widget.title || ('label' in widget ? widget.label : humanize(widget.type));
+      if ('label' in duplicate) duplicate.label = `${title} copy`;
+      duplicate.title = `${title} copy`;
+      widgets.splice(index + 1, 0, duplicate);
+      label = `Duplicated ${title}`;
+    } else {
+      if (widgets.length === 1) {
+        flashStatus('A dashboard needs at least one widget', true);
+        return;
+      }
+      widgets.splice(index, 1);
+      label = `Removed ${widget.title || ('label' in widget ? widget.label : humanize(widget.type))}`;
+    }
+    const recipe = { ...current.recipe, widgets };
+    commitRecipeChange(recipe, label, { changedWidgets: new Set(widgets.map(widgetFingerprint)) });
+    window.setTimeout(() => dispatch({ type: 'patch', value: { changedWidgets: new Set() } }), 1200);
+    flashStatus(label);
+  }, [commitRecipeChange, flashStatus]);
+
+  const navigateRecipeHistory = useCallback((offset: -1 | 1) => {
+    const current = stateRef.current;
+    if (!current.recipe) return;
+    const index = current.recipeHistoryIndex + offset;
+    const revision = current.recipeHistory[index];
+    if (!revision) return;
+    const recipe = cloneRecipe(revision.recipe);
+    dispatch({
+      type: 'patch',
+      value: {
+        recipe,
+        recipeHistoryIndex: index,
+        changedWidgets: new Set(recipe.widgets.map(widgetFingerprint)),
+      },
+    });
     persistSnapshot({
       rows: current.rows,
       schema: current.schema,
@@ -985,8 +1093,14 @@ function App() {
       updatedAt: current.updatedAt || Date.now(),
       id: current.id,
     });
-    flashStatus('Assumptions updated');
+    window.setTimeout(() => dispatch({ type: 'patch', value: { changedWidgets: new Set() } }), 1200);
+    flashStatus(`${offset < 0 ? 'Undo' : 'Redo'} · ${revision.label}`);
   }, [flashStatus, persistSnapshot]);
+
+  const openChefForWidget = useCallback((index: number) => {
+    dispatch({ type: 'patch', value: { chefOpen: true, chefWidgetIndex: index } });
+    window.setTimeout(() => document.getElementById('chef-input')?.focus(), 0);
+  }, []);
 
   const updateHealthIssue = useCallback((issue: DataHealthIssue, correct: boolean) => {
     const current = stateRef.current;
@@ -1051,11 +1165,11 @@ function App() {
     const history = [...current.chefHistory, userMessage];
     dispatch({ type: 'patch', value: { chefHistory: history, chefThinking: true } });
     try {
-      const raw = await complete(buildChefPrompt(text, current.recipe, current.rows, current.schema), 'chef');
+      const raw = await complete(buildChefPrompt(text, current.recipe, current.rows, current.schema, current.chefWidgetIndex), 'chef');
       const parsed = parseModelObject(raw);
       if (!Array.isArray(parsed.widgets)) throw new Error('The chef returned no widgets. Try rephrasing.');
       const repaired = repairCanonicalWidgets(parsed.widgets, current.recipe.widgets, current.rows, current.schema);
-      const validated = validateRecipe({ ...parsed, widgets: repaired }, current.schema, current.rows);
+      const validated = validateRecipe({ ...parsed, widgets: repaired }, current.schema, current.rows, { excludeOutliers: current.excludeOutliers });
       if (repaired.length > 1 && validated.dropped > 0 && validated.widgets.length < Math.ceil(repaired.length * 0.75)) {
         throw new Error('The chef returned an incomplete recipe. Try that edit again.');
       }
@@ -1072,6 +1186,10 @@ function App() {
         changes: Array.isArray(parsed.changes) ? parsed.changes.filter((value): value is string => typeof value === 'string').slice(0, 6) : [],
         previousRecipe,
       };
+      const target = current.chefWidgetIndex === null ? 'dashboard' : current.recipe.widgets[current.chefWidgetIndex];
+      const targetLabel = typeof target === 'string'
+        ? target
+        : target?.title || (target && 'label' in target ? target.label : 'widget');
       dispatch({
         type: 'patch',
         value: {
@@ -1079,6 +1197,7 @@ function App() {
           chefHistory: [...history, chefMessage],
           chefThinking: false,
           changedWidgets: diffWidgets(current.recipe.widgets, validated.widgets),
+          ...appendRecipeHistory(current, recipe, `Chef edited ${targetLabel}`),
         },
       });
       persistSnapshot({
@@ -1111,18 +1230,8 @@ function App() {
       index >= historyIndex && candidate.role === 'chef' && candidate.previousRecipe ? { ...candidate, undone: true } : candidate,
     );
     const recipe = message.previousRecipe;
-    dispatch({ type: 'patch', value: { recipe, chefHistory: history, changedWidgets: new Set(recipe.widgets.map(widgetFingerprint)) } });
-    persistSnapshot({
-      rows: current.rows,
-      schema: current.schema,
-      recipe,
-      dataSource: current.dataSource,
-      parseHealth: current.parseHealth,
-      previousSnapshot: current.previousSnapshot,
-      updatedAt: current.updatedAt || Date.now(),
-      id: current.id,
-    });
-  }, [persistSnapshot]);
+    commitRecipeChange(recipe, 'Undid Chef edit', { chefHistory: history, changedWidgets: new Set(recipe.widgets.map(widgetFingerprint)) });
+  }, [commitRecipeChange]);
 
   const restoreRecent = useCallback((recent: RecentDashboard) => {
     setPasteText('');
@@ -1151,6 +1260,9 @@ function App() {
         updatedAt: recent.updatedAt || recent.savedAt,
         chefHistory: [],
         chefOpen: false,
+        chefWidgetIndex: null,
+        recipeHistory: [recipeRevision(recent.recipe, 'Restored dashboard')],
+        recipeHistoryIndex: 0,
         error: '',
       },
     });
@@ -1201,6 +1313,8 @@ function App() {
   const health = state.parseHealth;
   const healthIssueCount = health?.issues.length || 0;
   const currentTitle = state.recipe?.title || state.title;
+  const chefTarget = state.chefWidgetIndex === null ? null : state.recipe?.widgets[state.chefWidgetIndex] || null;
+  const chefTargetLabel = chefTarget?.title || (chefTarget && 'label' in chefTarget ? chefTarget.label : null);
   const steps: Array<[LoadingStep, string]> = [['parse', 'Parse data'], ['infer', 'Infer schema'], ['layout', 'Propose layout'], ['render', 'Render dashboard']];
   return (
     <>
@@ -1266,7 +1380,8 @@ function App() {
             <div className="recent-rail-hd"><span className="eyebrow">Your plates · in this browser</span><button id="recent-clear" className="recent-rail-clear" onClick={() => { if (confirm('Clear all your plates from this browser?')) { clearRecents(); dispatch({ type: 'patch', value: { recents: [] } }); } }}>Clear all</button></div>
             <div id="recent-list" className="recent-list">{state.recents.map(recent => <button type="button" className="recent-card" key={recent.id} data-id={recent.id} onClick={() => restoreRecent(recent)}><h4 className="recent-card-title">{recent.title || 'Untitled'}</h4><div className="recent-card-meta"><span>{recent.rows.length}r · {recent.cols}c{recent.dataSource?.type === 'http' ? ' · HTTP' : ''}</span><span>{relativeTime(recent.savedAt)}</span></div></button>)}</div>
           </div>}
-          <div className="empty-foot"><div className="empty-foot-tip">tip — paste anywhere on the page <kbd>⌘V</kbd></div><div className="empty-samples"><span className="eyebrow" style={{ marginRight: 4 }}>Try a sample →</span>{Object.keys(SAMPLES).map(key => <button type="button" className="sample-chip" data-sample={key} key={key} onClick={() => { const text = JSON.stringify(SAMPLES[key], null, 2); setPasteText(text); dispatch({ type: 'patch', value: { title: SAMPLE_TITLES[key] } }); void runPipeline(text); }}>{key === 'saas' ? 'SaaS metrics' : 'Stripe payouts'}</button>)}</div></div>
+          <div className="empty-foot"><div className="empty-foot-tip">tip — paste anywhere on the page <kbd>⌘V</kbd></div></div>
+          <ExampleGallery examples={EXAMPLE_PLATES} onOpen={openExample} onUseNote={useExampleNote} />
           <footer className="site-foot"><span>Mise · browser-local dashboards</span><nav><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/examples.html">Examples</a><a href="/docs/about.html">About</a><a href="/docs/contact.html">Contact</a></nav></footer>
         </div></div>
       </section>
@@ -1302,6 +1417,14 @@ function App() {
                 <button id="share-recipe-link" type="button" className="btn btn-ghost" onClick={() => void copyRecipeLink()}>Copy recipe link</button>
                 <button id="export-html-btn" type="button" className="btn btn-ghost" onClick={exportStandalone}>Interactive HTML ↓</button>
               </div>
+              <div className="recipe-history">
+                <button id="recipe-undo" type="button" className="btn btn-ghost" disabled={state.recipeHistoryIndex <= 0} onClick={() => navigateRecipeHistory(-1)}>↶ Undo</button>
+                <button id="recipe-redo" type="button" className="btn btn-ghost" disabled={state.recipeHistoryIndex >= state.recipeHistory.length - 1} onClick={() => navigateRecipeHistory(1)}>↷ Redo</button>
+                <details>
+                  <summary>{state.recipeHistory.length} revision{state.recipeHistory.length === 1 ? '' : 's'}</summary>
+                  <ol>{state.recipeHistory.map((revision, index) => <li className={index === state.recipeHistoryIndex ? 'current' : ''} key={`${revision.at}-${index}`}>{revision.label}</li>)}</ol>
+                </details>
+              </div>
             </div>
             <RecurringReportSummary state={state} comparison={comparison} now={clock} onCadence={setRefreshCadence} />
             <WidgetGrid
@@ -1316,19 +1439,21 @@ function App() {
               onRetry={() => void retryAi()}
               onExportTable={exportTable}
               onCopyTable={widget => void copyTable(widget)}
+              onEditWidget={editWidget}
+              onChefWidget={openChefForWidget}
             />
           </>
         )}
       </section>
 
-      {state.stage === 'dash' && !state.chefOpen && <button id="chef-fab" className="chef-fab is-visible" type="button" onClick={() => dispatch({ type: 'patch', value: { chefOpen: true } })}><span className="chef-fab-glyph">M</span><span>Talk to the chef</span></button>}
+      {state.stage === 'dash' && !state.chefOpen && <button id="chef-fab" className="chef-fab is-visible" type="button" onClick={() => dispatch({ type: 'patch', value: { chefOpen: true, chefWidgetIndex: null } })}><span className="chef-fab-glyph">M</span><span>Talk to the chef</span></button>}
       <aside id="chef-panel" className={`chef-panel ${state.chefOpen ? 'is-open' : ''}`} aria-label="The Chef">
-        <div className="chef-hd"><div className="chef-hd-l"><span className="chef-hd-glyph">M</span><span className="chef-hd-name">The Chef</span></div><button id="chef-close" className="chef-close" type="button" aria-label="Close" onClick={() => dispatch({ type: 'patch', value: { chefOpen: false } })}>×</button></div>
+        <div className="chef-hd"><div className="chef-hd-l"><span className="chef-hd-glyph">M</span><span className="chef-hd-name">The Chef</span>{chefTargetLabel && <span id="chef-target" className="chef-hd-tag">Editing · {chefTargetLabel}</span>}</div><button id="chef-close" className="chef-close" type="button" aria-label="Close" onClick={() => dispatch({ type: 'patch', value: { chefOpen: false, chefWidgetIndex: null } })}>×</button></div>
         <div id="chef-body" className="chef-body">
           {!state.chefHistory.length && !state.chefThinking && <div id="chef-empty" className="chef-empty"><div className="chef-empty-eyebrow">Tell the chef what to change</div><p className="chef-empty-title">"Swap the donut for a bar chart, sorted by month."</p><div className="chef-suggestions">{[['Swap the donut for a bar chart', 'Swap the donut for a bar chart'], ['Hide the observations widget', 'Hide the observations widget'], ['Make the first KPI the hero metric — full width, larger', 'Promote the first KPI to a hero — full width'], ['Sort the table by date, descending, and limit to 20 rows', 'Sort the table by date desc, top 20'], ['Show a top 10 table sorted by the primary numeric metric, descending', 'Top 10 by primary metric']].map(([prompt, label]) => <button key={prompt} className="chef-suggestion" data-prompt={prompt} onClick={() => void submitChef(prompt)}>{label}</button>)}</div></div>}
           <div id="chef-msgs" className="chef-msgs">{state.chefHistory.map((message, index) => message.role === 'user' ? <div className="chef-msg-user" key={index}>{message.content}</div> : message.role === 'error' ? <div className="chef-msg-error" key={index}>{message.content}</div> : <div className={`chef-msg-chef ${message.undone ? 'is-undone' : ''}`} key={index}>"{message.content}"{message.previousRecipe && !message.undone && <button className="undo-btn" data-undo={index} type="button" onClick={() => undoChef(index)}>↶ Undo</button>}{message.changes?.length ? <span className="changes">{message.changes.join(' · ')}</span> : null}{message.undone && <span className="changes" style={{ color: 'var(--fg-mute)' }}>reverted</span>}</div>)}{state.chefThinking && <div className="chef-msg-thinking">tasting…</div>}</div>
         </div>
-        <div className="chef-input-row"><textarea id="chef-input" className="chef-input" rows={1} placeholder="Ask the chef to adjust…" value={chefInput} onChange={event => setChefInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); const value = chefInput; setChefInput(''); void submitChef(value); } }} /><button id="chef-send" className="chef-send" type="button" disabled={!chefInput.trim() || state.chefThinking} onClick={() => { const value = chefInput; setChefInput(''); void submitChef(value); }}>Send</button></div>
+        <div className="chef-input-row"><textarea id="chef-input" className="chef-input" rows={1} placeholder={chefTargetLabel ? `Adjust ${chefTargetLabel}…` : 'Ask the chef to adjust…'} value={chefInput} onChange={event => setChefInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); const value = chefInput; setChefInput(''); void submitChef(value); } }} /><button id="chef-send" className="chef-send" type="button" disabled={!chefInput.trim() || state.chefThinking} onClick={() => { const value = chefInput; setChefInput(''); void submitChef(value); }}>Send</button></div>
       </aside>
 
       <AssumptionsDialog state={state} onClose={() => dispatch({ type: 'patch', value: { assumptionsWidgetIndex: null } })} onApply={applyAssumption} />
