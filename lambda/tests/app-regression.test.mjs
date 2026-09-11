@@ -544,12 +544,21 @@ test("HTTP source dashboards save a refreshable URL and refresh without re-plann
     assert.equal(cookCalls, 1);
 
     await page.locator("#refresh-cadence").selectOption("5");
+    await page.evaluate(() => {
+      const recents = JSON.parse(localStorage.getItem("mise.recents.v1"));
+      recents[0].dataSource.fetchedAt = "2020-01-01T00:00:00.000Z";
+      recents[0].dataSource.lastAttemptAt = "2020-01-01T00:00:00.000Z";
+      localStorage.setItem("mise.recents.v1", JSON.stringify(recents));
+    });
     await page.reload({ waitUntil: "networkidle" });
     await page.getByText("Segment Revenue").first().click();
     await page.waitForSelector("#chef-fab.is-visible");
     assert.equal(await page.locator("#refresh-btn").isEnabled(), true);
     assert.equal(await page.locator("#refresh-cadence").inputValue(), "5");
     assert.match(await page.locator("#dataset-comparison").innerText(), /Since previous data/i);
+    await page.waitForFunction(() => document.getElementById("status-pill")?.innerText.includes("REFRESHED"));
+    assert.equal(fetchCalls, 3);
+    assert.equal(cookCalls, 1);
   });
 });
 
@@ -582,7 +591,7 @@ test("local dashboards replace data against the same recipe and report schema dr
     assert.match(text, /2 schema changes/i);
     assert.match(text, /added gross_margin/i);
     assert.match(text, /removed channel/i);
-    assert.match(text, /\+60k/);
+    assert.match(text, /\+\$60k/);
     assert.match(text, /vs previous dataset/i);
     assert.equal(cookCalls, 1);
     assert.equal(await page.locator("#refresh-btn").isEnabled(), false);
@@ -629,7 +638,7 @@ test("HTTP refresh failures remain visible without replacing good rows", async (
     assert.match(await page.locator("body").innerText(), /120k/);
     await page.waitForTimeout(2300);
     assert.match(await page.locator("#status-pill").innerText(), /HTTP · refresh error/i);
-  }, { allowConsole: /\[refresh\] failed/ });
+  }, { allowConsole: /\[refresh\] failed|Failed to load resource/ });
 });
 
 test("applying an HTTP recipe to pasted CSV does not advertise refresh", async () => {

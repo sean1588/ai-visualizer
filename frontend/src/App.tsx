@@ -765,7 +765,7 @@ function App() {
     const current = stateRef.current;
     if (!hasHttpSource(current.dataSource) || !current.recipe) return;
     const refreshMinutes = minutes === 5 || minutes === 15 || minutes === 60 ? minutes : 0;
-    const dataSource = { ...current.dataSource, refreshMinutes };
+    const dataSource: DataSource = { ...current.dataSource, type: 'http', refreshMinutes };
     dispatch({ type: 'patch', value: { dataSource } });
     persistSnapshot({
       rows: current.rows,
