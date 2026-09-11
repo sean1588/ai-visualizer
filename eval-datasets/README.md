@@ -7,10 +7,11 @@ and catch regressions in widget choice, labels, layout, and fallback behavior.
 
 ## How to Use
 
-1. Open the deployed app or a local static build.
-2. Upload one dataset from `raw/`.
-3. Check the rendered dashboard against the expectations in `manifest.json`.
-4. Save screenshots or notes under `notes/` when something looks wrong.
+1. Run `npm test` in `frontend/` for deterministic parser, schema, health, and fallback-recipe checks across every manifest entry.
+2. Run `npm run eval:layout -- <dataset-id>` in `frontend/` to evaluate live model layout separately from renderer correctness. Omit the id for the full corpus.
+3. Open the deployed app or a local static build and upload a dataset for visual review.
+4. Check the rendered dashboard against the expectations in `manifest.json`.
+5. Save screenshots or notes under `notes/` when something looks wrong.
 
 ## Current Coverage
 

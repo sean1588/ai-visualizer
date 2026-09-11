@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:public": "vite build --outDir ../public",
+    "eval:layout": "node --experimental-strip-types evals/live-layout.mjs",
     "preview": "vite preview",
     "test": "node --experimental-strip-types --test domain-tests/*.test.ts",
     "typecheck": "tsc --noEmit"

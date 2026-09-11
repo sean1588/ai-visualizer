@@ -213,6 +213,7 @@ export interface DashboardRecipe<W = RenderedWidget> {
   title: string;
   widgets: W[];
   fallback?: boolean;
+  rejectedWidgets?: number;
   dataSource?: DataSource | null;
 }
 

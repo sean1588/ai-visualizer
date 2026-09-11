@@ -194,6 +194,9 @@ test("landing copy accurately describes local profiling", async () => {
     assert.match(text, /aggregate facts sent once for inference/i);
     assert.doesNotMatch(text, /Nothing is uploaded/i);
     assert.doesNotMatch(text, /Claude/i);
+    const favicon = await page.locator('link[rel="icon"]').getAttribute("href");
+    assert.equal(favicon, "/favicon.svg");
+    assert.equal((await page.request.get(`${BASE_URL}${favicon}`)).status(), 200);
   }, { allowConsole: /AI response did not validate, falling back/ });
 });
 
@@ -421,6 +424,17 @@ test("mobile dashboard stacks without horizontal overflow and uses compact Chef 
   });
 });
 
+test("coarse-pointer controls meet the 44px touch target baseline", async () => {
+  await withPage(async page => {
+    await mockInference(page);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    assert.ok(await page.locator("#browse-btn").evaluate(element => element.getBoundingClientRect().height) >= 44);
+    await page.getByText("SAAS METRICS").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+    assert.ok(await page.locator(".assumption-chip").first().evaluate(element => element.getBoundingClientRect().height) >= 44);
+  }, { context: { hasTouch: true, viewport: devices["iPhone 14 Pro"].viewport } });
+});
+
 test("Chef accepts recoverable rendered-widget replies instead of surfacing invalid recipe", async () => {
   await withPage(async page => {
     await mockInference(page, RENDERED_SHAPE_CHEF);
@@ -532,6 +546,59 @@ test("chart points and legends open the contributing-row inspector", async () =>
     await page.locator(".legend-button").filter({ hasText: "startup" }).click();
     assert.match(await page.locator("#inspector-title").textContent(), /startup/i);
     assert.match(await page.locator("#inspector-meta").textContent(), /2 matching rows/);
+  });
+});
+
+test("charts expose summaries, data tables, keyboard inspection, and live status", async () => {
+  await withPage(async page => {
+    await mockInference(page);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.getByText("SAAS METRICS").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    assert.equal(await page.locator("#status-pill").getAttribute("role"), "status");
+    assert.equal(await page.locator("#status-pill").getAttribute("aria-live"), "polite");
+    assert.match(await page.locator("button.mark").getAttribute("aria-label"), /new Mise dashboard/i);
+    assert.match(await page.locator(".w-chart svg").first().getAttribute("aria-label"), /MRR Trend.*12 points/i);
+
+    await page.locator(".w-chart .chart-data-table summary").first().click();
+    assert.match(await page.locator(".w-chart .chart-data-table table").first().getAttribute("aria-label"), /MRR Trend chart data/i);
+    assert.ok(await page.locator(".w-chart .chart-data-table tbody tr").first().count());
+
+    await page.locator(".w-chart .chart-keyboard-point").first().press("Enter");
+    await page.waitForSelector("#inspector-dialog[open]");
+    await page.waitForFunction(() => document.activeElement?.id === "inspector-search");
+  });
+});
+
+test("product events contain only allowlisted metadata", async () => {
+  await withPage(async page => {
+    const events = [];
+    await mockInference(page);
+    await page.unroute("**/api/events");
+    await page.route("**/api/events", async route => {
+      events.push(route.request().postDataJSON());
+      await route.fulfill({ status: 204, body: "" });
+    });
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.getByText("SAAS METRICS").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+    await page.locator(".w-chart .chart-hit").first().click();
+    await page.locator("#inspector-close").click();
+    const downloadPromise = page.waitForEvent("download");
+    await page.locator("#export-recipe-btn").click();
+    await downloadPromise;
+    await page.waitForFunction(() => window.__mise.state.stage === "dash");
+    await page.waitForTimeout(100);
+
+    const names = events.map(item => item.event);
+    assert.ok(names.includes("ingest_started"));
+    assert.ok(names.includes("dashboard_rendered"));
+    assert.ok(names.includes("chart_inspected"));
+    assert.ok(names.includes("export_created"));
+    const serialized = JSON.stringify(events);
+    assert.doesNotMatch(serialized, /mrr|month|https?:|SaaS Growth/i);
+    assert.ok(events.every(item => item.version === 1));
   });
 });
 
@@ -716,6 +783,25 @@ test("chartable table-only model output falls back to a useful dashboard", async
     assert.match(text, /Raw rows|Rows/i);
     assert.doesNotMatch(text, /undefined/);
   }, { allowConsole: /AI response did not validate, falling back/ });
+});
+
+test("partially invalid planner output visibly reports rejected widgets", async () => {
+  await withPage(async page => {
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, {
+      title: "Repaired revenue",
+      widgets: [
+        { type: "kpi", span: 3, title: "Revenue", fields: { metric: "revenue", aggregate: "sum" } },
+        { type: "line", span: 6, title: "Invalid", fields: { x: "missing_date", y: "revenue" } },
+        { type: "table", span: 12, title: "Rows", fields: { limit: 10 } },
+      ],
+    });
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#paste").fill(JSON.stringify(SEGMENT_REVENUE));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#rejected-widgets-banner");
+    assert.match(await page.locator("#rejected-widgets-banner").innerText(), /1 invalid model widget was rejected/i);
+    assert.match(await page.locator("body").innerText(), /\$120k/);
+  });
 });
 
 test("HTTP source dashboards save a refreshable URL and refresh without re-planning", async () => {
@@ -1177,7 +1263,7 @@ test("compact numbers never print 1000B for just-under-a-trillion values", async
 
 async function withPage(fn, options = {}) {
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ acceptDownloads: true, viewport: { width: 1440, height: 1100 } });
+  const page = await browser.newPage({ acceptDownloads: true, viewport: { width: 1440, height: 1100 }, ...(options.context || {}) });
   const messages = [];
   page.on("console", msg => {
     if (["error", "warning"].includes(msg.type())) messages.push(`${msg.type()}: ${msg.text()}`);
@@ -1203,6 +1289,9 @@ async function mockInference(page, chefRecipe = CHEF_WITHOUT_OBSERVATIONS, planR
       canvas.getContext("2d").fillRect(0, 0, 64, 64);
       return canvas;
     };
+  });
+  await page.route("**/api/events", async route => {
+    await route.fulfill({ status: 204, body: "" });
   });
   await page.route("**/api/cook", async route => {
     onRequest?.(route.request());

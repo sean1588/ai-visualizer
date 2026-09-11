@@ -152,6 +152,48 @@ function Sparkline({ values }: { values: number[] }) {
   );
 }
 
+function ChartDataTable({
+  title,
+  columns,
+  rows,
+}: {
+  title: string;
+  columns: string[];
+  rows: Array<Array<string | number>>;
+}) {
+  return (
+    <details className="chart-data-table">
+      <summary>View chart data</summary>
+      <div className="table-scroll">
+        <table aria-label={`${title} chart data`}>
+          <thead><tr>{columns.map(column => <th key={column}>{column}</th>)}</tr></thead>
+          <tbody>{rows.map((row, index) => <tr key={index}>{row.map((value, valueIndex) => <td key={valueIndex}>{value}</td>)}</tr>)}</tbody>
+        </table>
+      </div>
+    </details>
+  );
+}
+
+function ChartKeyboardPoints({
+  title,
+  points,
+  onInspect,
+}: {
+  title: string;
+  points: Array<{ label: string; value: unknown }>;
+  onInspect: (value: unknown) => void;
+}) {
+  return (
+    <div className="chart-keyboard-points" aria-label={`${title} interactive points`}>
+      {points.map((point, index) => (
+        <button className="chart-keyboard-point" type="button" key={`${point.label}-${index}`} onClick={() => onInspect(point.value)}>
+          Inspect {point.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function KpiCard({
   widget,
   index,
@@ -268,7 +310,7 @@ function DonutCard({
         />
       </div>
       <div className="donut-body">
-        <svg viewBox="0 0 180 180" width="180" height="180">
+        <svg viewBox="0 0 180 180" width="180" height="180" role="group" aria-label={`${widget.title}. ${data.length} categories totaling ${String(formatFull(total, widget.metric, widget.format, { rows, schema }))}.`}>
           {data.map((item, dataIndex) => {
             const fraction = item.value / total;
             const start = accumulated * Math.PI * 2 - Math.PI / 2;
@@ -288,17 +330,12 @@ function DonutCard({
               <path
                 key={item.key}
                 className="chart-hit"
-                role="button"
-                tabIndex={0}
                 data-inspect-widget={widgetFingerprint(widget)}
                 data-inspect-value={encodeURIComponent(item.key)}
                 d={path}
                 fill={colors[dataIndex % colors.length]}
                 opacity="0.9"
                 onClick={() => onInspect(widget, item.key)}
-                onKeyDown={event => {
-                  if (event.key === 'Enter' || event.key === ' ') onInspect(widget, item.key);
-                }}
               >
                 <title>{item.key}: {String(formatFull(item.value, widget.metric, widget.format, { rows, schema }))}</title>
               </path>
@@ -328,6 +365,15 @@ function DonutCard({
           ))}
         </ul>
       </div>
+      <ChartDataTable
+        title={widget.title}
+        columns={[humanize(widget.cat), humanize(widget.metric), 'Share']}
+        rows={data.map(item => [
+          item.key,
+          String(formatFull(item.value, widget.metric, widget.format, { rows, schema })),
+          `${(item.value / total * 100).toFixed(1)}%`,
+        ])}
+      />
     </div>
   );
 }
@@ -401,7 +447,7 @@ function CountBarCard({
         <h3>{widget.title}</h3>
         <WidgetActions widget={widget} index={index} meta={`count · ${data.length}`} onAssumptions={onAssumptions} onInspect={onInspect} />
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="group" aria-label={`${widget.title}. Counts for ${data.length} categories.`}>
         {Array.from({ length: 4 }, (_, tick) => {
           const value = maximum * (tick / 3);
           const y = yScale(value);
@@ -414,8 +460,6 @@ function CountBarCard({
             <rect
               key={item.key}
               className="chart-hit"
-              role="button"
-              tabIndex={0}
               data-inspect-widget={widgetFingerprint(widget)}
               data-inspect-value={encodeURIComponent(item.key)}
               x={x}
@@ -425,9 +469,6 @@ function CountBarCard({
               fill="var(--accent-2)"
               opacity="0.85"
               onClick={() => onInspect(widget, item.key)}
-              onKeyDown={event => {
-                if (event.key === 'Enter' || event.key === ' ') onInspect(widget, item.key);
-              }}
             >
               <title>{item.key}: {item.value.toLocaleString()} rows</title>
             </rect>
@@ -435,6 +476,8 @@ function CountBarCard({
         })}
         {data.map((item, dataIndex) => <text key={item.key} className="axis-tick" x={paddingLeft + dataIndex * barWidth + barWidth / 2} y={height - 12} textAnchor="middle">{item.key.slice(0, 10)}</text>)}
       </svg>
+      <ChartKeyboardPoints title={widget.title} points={data.map(item => ({ label: `${item.key}: ${item.value} rows`, value: item.key }))} onInspect={value => onInspect(widget, value)} />
+      <ChartDataTable title={widget.title} columns={[humanize(widget.cat), 'Rows']} rows={data.map(item => [item.key, item.value])} />
     </div>
   );
 }
@@ -487,7 +530,7 @@ function SeriesCard({
         <h3>{widget.title}</h3>
         <WidgetActions widget={widget} index={index} meta={meta} onAssumptions={onAssumptions} onInspect={onInspect} />
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className={widget.span >= 12 ? 'tall' : ''}>
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className={widget.span >= 12 ? 'tall' : ''} role="group" aria-label={`${widget.title}. ${data.length} ${widget.type === 'line' ? 'points' : 'bars'} from ${String(data[0].x)} to ${String(data[data.length - 1].x)}.`}>
         {Array.from({ length: widget.type === 'line' ? 5 : 4 }, (_, tick) => {
           const denominator = widget.type === 'line' ? 4 : 3;
           const value = minimum + (maximum - minimum) * (tick / denominator);
@@ -502,8 +545,6 @@ function SeriesCard({
               <circle
                 key={`${String(item.x)}-${dataIndex}`}
                 className="chart-hit"
-                role="button"
-                tabIndex={0}
                 data-inspect-widget={widgetFingerprint(widget)}
                 data-inspect-value={encodeURIComponent(String(item.x))}
                 cx={xAt(dataIndex)}
@@ -513,9 +554,6 @@ function SeriesCard({
                 stroke="var(--accent)"
                 strokeWidth="1.25"
                 onClick={() => onInspect(widget, item.x)}
-                onKeyDown={event => {
-                  if (event.key === 'Enter' || event.key === ' ') onInspect(widget, item.x);
-                }}
               >
                 <title>{String(item.x)}: {String(formatFull(item.y, widget.y, widget.format, { rows, schema }))}</title>
               </circle>
@@ -527,8 +565,6 @@ function SeriesCard({
             <rect
               key={`${String(item.x)}-${dataIndex}`}
               className="chart-hit"
-              role="button"
-              tabIndex={0}
               data-inspect-widget={widgetFingerprint(widget)}
               data-inspect-value={encodeURIComponent(String(item.x))}
               x={paddingLeft + dataIndex * xStep + xStep * 0.15}
@@ -538,9 +574,6 @@ function SeriesCard({
               fill={color}
               opacity="0.85"
               onClick={() => onInspect(widget, item.x)}
-              onKeyDown={event => {
-                if (event.key === 'Enter' || event.key === ' ') onInspect(widget, item.x);
-              }}
             >
               <title>{String(item.x)}: {String(formatFull(item.y, widget.y, widget.format, { rows, schema }))}</title>
             </rect>
@@ -551,6 +584,19 @@ function SeriesCard({
           return <text key={`${String(item.x)}-${dataIndex}`} className="axis-tick" x={xAt(dataIndex)} y={height - 10} textAnchor="middle">{String(item.x).slice(0, 7)}</text>;
         })}
       </svg>
+      <ChartKeyboardPoints
+        title={widget.title}
+        points={data.map(item => ({
+          label: `${String(item.x)}: ${String(formatFull(item.y, widget.y, widget.format, { rows, schema }))}`,
+          value: item.x,
+        }))}
+        onInspect={value => onInspect(widget, value)}
+      />
+      <ChartDataTable
+        title={widget.title}
+        columns={[humanize(widget.x), humanize(widget.y)]}
+        rows={data.map(item => [String(item.x), String(formatFull(item.y, widget.y, widget.format, { rows, schema }))])}
+      />
     </div>
   );
 }
@@ -644,6 +690,12 @@ export default function WidgetGrid({
           <span className="banner-eyebrow">⚠ Couldn’t reach the AI</span>
           <span className="banner-msg">Showing a default layout based on your schema. Notes were kept — try again for an AI-designed dashboard.</span>
           <button type="button" className="btn btn-ghost retry-ai-btn" id="retry-ai-btn" onClick={onRetry}>Try again</button>
+        </div>
+      )}
+      {!!recipe.rejectedWidgets && (
+        <div id="rejected-widgets-banner" className="w w-banner w-banner-rejected" style={{ gridColumn: 'span 12' }}>
+          <span className="banner-eyebrow">Recipe repaired</span>
+          <span className="banner-msg">{recipe.rejectedWidgets} invalid model widget{recipe.rejectedWidgets === 1 ? ' was' : 's were'} rejected. The remaining dashboard uses only fields supported by this dataset.</span>
         </div>
       )}
       {recipe.widgets.map((widget, index) => {

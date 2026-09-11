@@ -290,6 +290,7 @@ export function parseAndValidateRecipe(
   const tables = validated.filter(widget => widget.type === 'table').slice(0, 1);
   const others = validated.filter(widget => widget.type !== 'table');
   const finalWidgets: RenderedWidget[] = [...others, ...tables];
+  const rejectedWidgets = Math.max(0, object.widgets.length - finalWidgets.length);
   const observations = Array.isArray(object.observations)
     ? object.observations
       .filter((observation): observation is string =>
@@ -304,7 +305,7 @@ export function parseAndValidateRecipe(
   const title = suppliedTitle
     ? suppliedTitle.replace(/^["']|["']$/g, '').slice(0, 60)
     : 'Untitled dashboard';
-  return { title, widgets: finalWidgets };
+  return { title, widgets: finalWidgets, ...(rejectedWidgets ? { rejectedWidgets } : {}) };
 }
 
 export function deterministicRecipe(
