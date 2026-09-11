@@ -2,10 +2,12 @@ import { formatCompact } from './formatting.ts';
 import { isPlainObject, looksLikeDate } from './parsing.ts';
 import type {
   ColumnType,
+  DataHealthIssue,
   IncomingHealth,
   ParseHealth,
   Row,
   SchemaColumn,
+  SchemaOverrides,
 } from './types.ts';
 
 export function columnLooksLikeRatio(name: string, values: readonly number[]): boolean {
@@ -19,7 +21,8 @@ export function columnLooksLikeRatio(name: string, values: readonly number[]): b
 
 export function inferSchema(rows: readonly Row[]): SchemaColumn[] {
   if (!rows.length) return [];
-  return Object.keys(rows[0]).map(name => {
+  const names = [...new Set(rows.flatMap(row => Object.keys(row)))];
+  return names.map(name => {
     const values = rows
       .map(row => row[name])
       .filter(value => value !== null && value !== undefined && value !== '');
@@ -55,6 +58,18 @@ export function inferSchema(rows: readonly Row[]): SchemaColumn[] {
   });
 }
 
+export function applySchemaOverrides(
+  schema: readonly SchemaColumn[],
+  overrides: SchemaOverrides,
+): SchemaColumn[] {
+  return schema.map(column => {
+    const type = overrides[column.name];
+    return type
+      ? { ...column, type, asPercent: type === 'number' && column.asPercent }
+      : column;
+  });
+}
+
 export interface IqrBounds {
   lo: number;
   hi: number;
@@ -83,30 +98,128 @@ export function buildParseHealth(
   schema: readonly SchemaColumn[],
   incomingHealth: Partial<IncomingHealth> = {},
 ): ParseHealth {
-  const datesUnparsed = schema
-    .filter(column => column.type === 'string' || column.type === 'category')
-    .reduce((count, column) => {
-      const hits = rows.filter(row =>
-        row[column.name] != null
-        && row[column.name] !== ''
-        && looksLikeDate(row[column.name]),
-      ).length;
-      return count + (hits >= Math.max(2, Math.ceil(rows.length * 0.5)) ? hits : 0);
-    }, 0);
+  const issues: DataHealthIssue[] = [];
+  const missingByColumn = schema.map(column => ({
+    name: column.name,
+    count: rows.filter(row =>
+      row[column.name] === null
+      || row[column.name] === undefined
+      || row[column.name] === ''
+    ).length,
+  })).filter(item => item.count > 0);
+  const missingValues = missingByColumn.reduce((sum, item) => sum + item.count, 0);
+  if (incomingHealth.rowsDropped) {
+    issues.push({
+      id: 'dropped-rows',
+      kind: 'dropped-rows',
+      severity: 'info',
+      title: 'Empty rows ignored',
+      detail: `${incomingHealth.rowsDropped} empty row${incomingHealth.rowsDropped === 1 ? ' was' : 's were'} excluded while parsing.`,
+      count: incomingHealth.rowsDropped,
+      columns: [],
+    });
+  }
+  if (incomingHealth.irregularRows) {
+    issues.push({
+      id: 'irregular-rows',
+      kind: 'irregular-rows',
+      severity: 'warning',
+      title: 'Irregular CSV rows kept',
+      detail: `${incomingHealth.irregularRows} row${incomingHealth.irregularRows === 1 ? ' has' : 's have'} a different field count. Missing cells remain empty and extra fields use generated column names.`,
+      count: incomingHealth.irregularRows,
+      columns: [],
+    });
+  }
+  if (missingValues) {
+    issues.push({
+      id: 'missing-values',
+      kind: 'missing-values',
+      severity: 'warning',
+      title: 'Missing values',
+      detail: missingByColumn.map(item => `${item.name}: ${item.count}`).join(' · '),
+      count: missingValues,
+      columns: missingByColumn.map(item => item.name),
+    });
+  }
+  const timeColumn = schema.find(column => column.type === 'date');
+  let duplicateTimeKeys = 0;
+  if (timeColumn) {
+    const counts = new Map<string, number>();
+    rows.forEach(row => {
+      const value = row[timeColumn.name];
+      if (value === null || value === undefined || value === '') return;
+      const key = String(value);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    duplicateTimeKeys = [...counts.values()].reduce((sum, count) => sum + Math.max(0, count - 1), 0);
+    if (duplicateTimeKeys) {
+      issues.push({
+        id: `duplicate-time-${timeColumn.name}`,
+        kind: 'duplicate-time-keys',
+        severity: 'info',
+        title: `Repeated ${timeColumn.name} values`,
+        detail: `${duplicateTimeKeys} additional row${duplicateTimeKeys === 1 ? ' shares' : 's share'} a time key. This can be valid for segmented data.`,
+        count: duplicateTimeKeys,
+        columns: [timeColumn.name],
+      });
+    }
+  }
+  const inconsistentDates = schema.flatMap(column => {
+    if (column.type !== 'string' && column.type !== 'category') return [];
+    const values = rows
+      .map(row => row[column.name])
+      .filter(value => value !== null && value !== undefined && value !== '');
+    const dateLike = values.filter(looksLikeDate).length;
+    if (dateLike < 2 || dateLike === values.length) return [];
+    return [{ name: column.name, invalid: values.length - dateLike, total: values.length }];
+  });
+  const datesUnparsed = inconsistentDates.reduce((sum, item) => sum + item.invalid, 0);
+  inconsistentDates.forEach(item => {
+    issues.push({
+      id: `inconsistent-date-${item.name}`,
+      kind: 'inconsistent-dates',
+      severity: 'warning',
+      title: `Mixed date values in ${item.name}`,
+      detail: `${item.invalid} of ${item.total} non-empty values do not match the dominant date shape.`,
+      count: item.invalid,
+      columns: [item.name],
+      correction: 'treat-as-date',
+    });
+  });
   let outlierCount = 0;
+  const outliersByColumn: Array<{ name: string; count: number }> = [];
   for (const column of schema.filter(item => item.type === 'number')) {
     const values = rows
       .map(row => row[column.name])
       .filter((value): value is number => typeof value === 'number');
     const bounds = iqrBounds(values);
     if (!bounds) continue;
-    outlierCount += values.filter(value => value < bounds.lo || value > bounds.hi).length;
+    const count = values.filter(value => value < bounds.lo || value > bounds.hi).length;
+    if (count) outliersByColumn.push({ name: column.name, count });
+    outlierCount += count;
+  }
+  if (outlierCount) {
+    issues.push({
+      id: 'outliers',
+      kind: 'outliers',
+      severity: 'info',
+      title: 'Statistical outliers',
+      detail: outliersByColumn.map(item => `${item.name}: ${item.count}`).join(' · '),
+      count: outlierCount,
+      columns: outliersByColumn.map(item => item.name),
+      correction: 'include-outliers',
+    });
   }
   return {
     rowsParsed: incomingHealth.rowsParsed ?? rows.length,
     rowsDropped: incomingHealth.rowsDropped ?? 0,
+    irregularRows: incomingHealth.irregularRows,
+    audit: incomingHealth.audit,
     datesUnparsed,
     outlierCount,
+    missingValues,
+    duplicateTimeKeys,
+    issues,
     format: incomingHealth.format || 'unknown',
   };
 }

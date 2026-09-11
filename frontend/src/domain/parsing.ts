@@ -1,4 +1,4 @@
-import type { IncomingHealth, Row } from './types.ts';
+import type { DataAuditEntry, IncomingHealth, Row } from './types.ts';
 
 export interface CsvRecords {
   records: string[][];
@@ -159,17 +159,25 @@ export function splitCsv(line: string): string[] {
 export function rowsFromCsvRecords(records: readonly string[][], droppedBlank = 0): {
   rows: Row[];
   dropped: number;
+  irregularRows: number;
+  audit: DataAuditEntry[];
 } {
   if (records.length < 2) throw new Error('Need at least a header row and one data row.');
-  const headers = records[0].map((header, index) => String(header || '').trim() || `column_${index + 1}`);
+  const declaredColumns = records[0].length;
+  const columnCount = Math.max(declaredColumns, ...records.slice(1).map(cells => cells.length));
+  const headers = Array.from({ length: columnCount }, (_, index) =>
+    String(records[0][index] || '').trim() || `column_${index + 1}`,
+  );
   const rows: Row[] = [];
   let dropped = droppedBlank;
+  let irregularRows = 0;
 
   for (const cells of records.slice(1)) {
     if (cells.every(cell => String(cell).trim() === '')) {
       dropped++;
       continue;
     }
+    if (cells.length !== declaredColumns) irregularRows++;
     const row: Row = {};
     headers.forEach((header, index) => {
       row[header] = coerceCell(cells[index]) as Row[string];
@@ -181,7 +189,20 @@ export function rowsFromCsvRecords(records: readonly string[][], droppedBlank = 
     rows.push(row);
   }
   if (!rows.length) throw new Error('Need at least a header row and one data row.');
-  return { rows, dropped };
+  const audit: DataAuditEntry[] = [];
+  if (dropped) {
+    audit.push({
+      action: 'dropped-empty-rows',
+      detail: `${dropped} empty row${dropped === 1 ? ' was' : 's were'} ignored during CSV parsing.`,
+    });
+  }
+  if (irregularRows) {
+    audit.push({
+      action: 'kept-irregular-rows',
+      detail: `${irregularRows} row${irregularRows === 1 ? ' had' : 's had'} a different field count; missing cells were kept empty and extra fields were preserved.`,
+    });
+  }
+  return { rows, dropped, irregularRows, audit };
 }
 
 export function incomingKind(text: string): IncomingData {
@@ -205,11 +226,17 @@ export function incomingKind(text: string): IncomingData {
     };
   }
   const { records, droppedBlank } = parseCsvRecords(trimmed);
-  const { rows, dropped } = rowsFromCsvRecords(records, droppedBlank);
+  const { rows, dropped, irregularRows, audit } = rowsFromCsvRecords(records, droppedBlank);
   return {
     kind: 'rows',
     rows,
-    health: { rowsParsed: rows.length, rowsDropped: dropped, format: 'csv' },
+    health: {
+      rowsParsed: rows.length,
+      rowsDropped: dropped,
+      format: 'csv',
+      ...(irregularRows ? { irregularRows } : {}),
+      ...(audit.length ? { audit } : {}),
+    },
   };
 }
 

@@ -136,7 +136,11 @@
   .dash-head { padding: 22px 32px 16px; border-bottom: 1px solid var(--rule-soft); background: var(--bg); }
   .dash-head h1 { font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 36px; letter-spacing: -0.02em; margin: 4px 0 6px; }
   .dash-head-meta { font-family: var(--font-mono); font-size: 11px; color: var(--fg-mute); letter-spacing: 0.04em; }
-  .dash-health { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-mute); letter-spacing: 0.04em; margin-top: 6px; }
+  .dash-health { display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-mute); letter-spacing: 0.04em; margin-top: 6px; }
+  .health-summary { border: 0; border-bottom: 1px solid var(--accent-2); padding: 0; background: transparent; color: var(--accent-2); font: inherit; cursor: pointer; }
+  .health-summary.has-issues { border-color: var(--accent); color: var(--accent); }
+  .dash-share-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .dash-share-actions .btn { padding: 5px 9px; font-size: 9px; }
   .recurring-report { padding: 14px 32px 0; }
   .source-freshness { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 12px; border: 1px solid var(--rule-soft); background: var(--bg-elev); }
   .source-freshness > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -249,6 +253,25 @@
   .assumption-field select, .assumption-field input, .inspector-search { width: 100%; padding: 9px 10px; border: 1px solid var(--rule-soft); background: var(--bg-elev); color: var(--fg); font: inherit; }
   .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
   .dialog-error { color: var(--accent); font-family: var(--font-mono); font-size: 11px; min-height: 1.5em; margin-top: 10px; }
+  .health-issues { display: grid; gap: 10px; }
+  .health-clean { display: grid; gap: 4px; padding: 16px; border: 1px solid var(--accent-2); background: rgba(74,102,81,0.08); }
+  .health-clean strong { font-family: var(--font-display); font-style: italic; font-size: 18px; }
+  .health-clean span { color: var(--fg-mute); }
+  .health-issue { padding: 14px; border: 1px solid var(--rule-soft); background: var(--bg-elev); }
+  .health-issue.warning { border-left: 3px solid var(--accent); }
+  .health-issue.info { border-left: 3px solid var(--accent-3); }
+  .health-issue-main { display: grid; grid-template-columns: 34px 1fr; gap: 12px; }
+  .health-count { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--rule); border-radius: 50%; font-family: var(--font-mono); font-size: 10px; }
+  .health-issue h3 { margin: 0 0 3px; font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 17px; }
+  .health-issue p { margin: 0; color: var(--fg-mute); font-size: 12px; }
+  .health-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+  .health-actions .btn { padding: 5px 9px; font-size: 9px; }
+  .health-audit { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--rule); }
+  .health-audit > p { color: var(--fg-mute); }
+  .health-audit ol { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 6px; }
+  .health-audit li { display: grid; grid-template-columns: minmax(130px, auto) 1fr auto; gap: 10px; padding: 8px 0; border-bottom: 1px dashed var(--rule-soft); font-family: var(--font-mono); font-size: 10px; }
+  .health-audit li strong { text-transform: uppercase; letter-spacing: 0.05em; }
+  .health-audit li span, .health-audit li time { color: var(--fg-mute); }
   .inspector-toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) auto; gap: 12px; align-items: center; margin-bottom: 12px; }
   .inspector-table-wrap { overflow: auto; max-height: min(520px, 60vh); border: 1px solid var(--rule-soft); }
   .inspector-table { width: 100%; border-collapse: collapse; }
@@ -408,6 +431,8 @@
     .refresh-cadence { width: 100%; justify-content: space-between; }
     .comparison-heading { align-items: flex-start; flex-direction: column; }
     .schema-drift { align-items: flex-start; flex-direction: column; }
+    .dash-health { align-items: flex-start; flex-direction: column; }
+    .health-audit li { grid-template-columns: 1fr; }
     .dash-grid { padding: 12px 14px 120px; gap: 12px; }
     .w { padding: 16px; min-height: 0; }
     .w-3, .w-4, .w-6, .w-8, .w-12 { grid-column: span 12; }

@@ -19,12 +19,44 @@ export interface IncomingHealth {
   rowsParsed: number;
   rowsDropped: number;
   format: InputFormat;
+  irregularRows?: number;
+  audit?: DataAuditEntry[];
 }
 
 export interface ParseHealth extends IncomingHealth {
   datesUnparsed: number;
   outlierCount: number;
+  missingValues: number;
+  duplicateTimeKeys: number;
+  issues: DataHealthIssue[];
 }
+
+export type DataHealthIssueKind =
+  | 'dropped-rows'
+  | 'irregular-rows'
+  | 'missing-values'
+  | 'duplicate-time-keys'
+  | 'inconsistent-dates'
+  | 'outliers';
+
+export interface DataHealthIssue {
+  id: string;
+  kind: DataHealthIssueKind;
+  severity: 'info' | 'warning';
+  title: string;
+  detail: string;
+  count: number;
+  columns: string[];
+  correction?: 'treat-as-date' | 'include-outliers';
+}
+
+export interface DataAuditEntry {
+  at?: number;
+  action: string;
+  detail: string;
+}
+
+export type SchemaOverrides = Record<string, ColumnType>;
 
 export type WidgetSpan = 3 | 4 | 6 | 8 | 12;
 export type NumberFormat = 'auto' | 'number' | 'currency' | 'percent';

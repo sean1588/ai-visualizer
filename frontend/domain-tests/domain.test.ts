@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   aggregateBy,
+  applySchemaOverrides,
   applyRecipeToRows,
   buildDataProfile,
   buildParseHealth,
@@ -32,6 +33,12 @@ import {
   type Row,
   type SchemaColumn,
 } from '../src/domain/index.ts';
+import {
+  buildRecipeLink,
+  buildStandaloneHtml,
+  decodeRecipeFragment,
+  encodeRecipeFragment,
+} from '../src/sharing.ts';
 
 test('CSV parsing handles BOMs, quoted delimiters, newlines, escapes, and blank records', () => {
   const source = '\uFEFFname,amount,note\n"A, Inc",42,"line one\nline two"\n\nB,7,"said ""hi"""\n';
@@ -50,7 +57,15 @@ test('CSV parsing handles BOMs, quoted delimiters, newlines, escapes, and blank 
       { name: 'A, Inc', amount: 42, note: 'line one\nline two' },
       { name: 'B', amount: 7, note: 'said "hi"' },
     ]);
-    assert.deepEqual(incoming.health, { rowsParsed: 2, rowsDropped: 1, format: 'csv' });
+    assert.deepEqual(incoming.health, {
+      rowsParsed: 2,
+      rowsDropped: 1,
+      format: 'csv',
+      audit: [{
+        action: 'dropped-empty-rows',
+        detail: '1 empty row was ignored during CSV parsing.',
+      }],
+    });
   }
 });
 
@@ -103,9 +118,33 @@ test('schema inference and parse health preserve ratio and outlier heuristics', 
     rowsDropped: 2,
     format: 'csv',
   });
-  assert.equal(health.datesUnparsed, 6);
+  assert.equal(health.datesUnparsed, 2);
   assert.equal(health.outlierCount, 1);
   assert.equal(health.rowsDropped, 2);
+  assert.ok(health.issues.some(issue => issue.kind === 'inconsistent-dates'));
+  assert.ok(health.issues.some(issue => issue.kind === 'outliers'));
+});
+
+test('data health preserves irregular fields and reports missing, duplicate, and ambiguous values', () => {
+  const incoming = incomingKind('date,revenue\n2026-01-01,10\n2026-01-01,20,west\nunknown,\n');
+  assert.equal(incoming.kind, 'rows');
+  if (incoming.kind !== 'rows') return;
+  assert.equal(incoming.rows[1].column_3, 'west');
+  assert.equal(incoming.health.irregularRows, 1);
+  const schema = inferSchema(incoming.rows);
+  assert.deepEqual(schema.map(column => column.name), ['date', 'revenue', 'column_3']);
+  const health = buildParseHealth(incoming.rows, schema, incoming.health);
+  assert.equal(health.missingValues, 3);
+  assert.equal(health.duplicateTimeKeys, 0);
+  assert.ok(health.issues.some(issue => issue.kind === 'irregular-rows'));
+  assert.ok(health.issues.some(issue => issue.kind === 'missing-values'));
+  const dateIssue = health.issues.find(issue => issue.kind === 'inconsistent-dates');
+  assert.equal(dateIssue?.correction, 'treat-as-date');
+
+  const overridden = applySchemaOverrides(schema, { date: 'date' });
+  const corrected = buildParseHealth(incoming.rows, overridden, incoming.health);
+  assert.equal(corrected.issues.some(issue => issue.kind === 'inconsistent-dates'), false);
+  assert.equal(corrected.duplicateTimeKeys, 1);
 });
 
 test('profiles use the complete row set and collapse repeated time ticks', () => {
@@ -368,6 +407,47 @@ test('recipe payload construction is deterministic and rehydration is global-fre
   const rehydrated = applyRecipeToRows(imported, rows, schema);
   assert.equal(rehydrated.title, 'Imported');
   assert.ok(rehydrated.widgets.length > 0);
+});
+
+test('recipe links omit data sources and standalone exports embed an interactive local snapshot', () => {
+  const rows: Row[] = [
+    { date: '2026-01-01', customer: 'Ada', revenue: 100 },
+    { date: '2026-02-01', customer: 'Lin', revenue: 120 },
+  ];
+  const schema = inferSchema(rows);
+  const recipe = deterministicRecipe(rows, schema);
+  recipe.widgets.unshift({
+    type: 'observations',
+    span: 12,
+    observations: ['Revenue rose to 120.'],
+  });
+  const payload = buildRecipePayload({
+    recipe,
+    schema,
+    rows,
+    dataSource: { type: 'http', url: 'https://private.example/data.json' },
+    generatedAt: '2026-09-11T00:00:00.000Z',
+  });
+  const fragment = encodeRecipeFragment(payload);
+  const link = buildRecipeLink('https://app.example/#old', payload);
+  const decoded = decodeRecipeFragment(`#recipe=${fragment}`);
+  assert.ok(link.startsWith('https://app.example/#recipe='));
+  assert.equal(link.includes('private.example'), false);
+  assert.equal(decoded?.title, recipe.title);
+  assert.equal(decoded?.widgets.some(widget => (widget as { type?: string }).type === 'observations'), false);
+
+  const html = buildStandaloneHtml({
+    title: recipe.title,
+    dashboardHtml: '<section id="stage-dash" class="stage is-active"><button data-inspect-widget="kpi:revenue:last:auto:Revenue">View rows</button></section>',
+    css: ':root{--bg:#fff}',
+    rows,
+    schema,
+    recipe,
+  });
+  assert.match(html, /Interactive snapshot exported from Mise/);
+  assert.match(html, /standalone-inspector/);
+  assert.match(html, /data-inspect-widget/);
+  assert.doesNotMatch(html, /private\.example/);
 });
 
 test('last-value KPI exclusion remains configurable and only checks real series', () => {

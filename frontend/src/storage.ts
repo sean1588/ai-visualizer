@@ -1,10 +1,12 @@
 import type {
   DashboardRecipe,
+  DataAuditEntry,
   DataSource,
   DatasetSnapshot,
   ParseHealth,
   Row,
   SchemaColumn,
+  SchemaOverrides,
 } from './domain';
 
 const STORAGE_KEY = 'mise.recents.v1';
@@ -19,6 +21,8 @@ export interface RecentDashboard {
   recipe: DashboardRecipe;
   dataSource: DataSource | null;
   parseHealth: ParseHealth | null;
+  schemaOverrides?: SchemaOverrides;
+  dataAudit?: DataAuditEntry[];
   previousSnapshot?: DatasetSnapshot | null;
   updatedAt?: number;
   savedAt: number;
