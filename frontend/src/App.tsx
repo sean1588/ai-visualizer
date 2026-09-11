@@ -1011,7 +1011,7 @@ function App() {
     try {
       const renderer = window.html2canvas || (await import('html2canvas')).default;
       const canvas = await renderer(dashboard, {
-        backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#f5f2ec',
+        backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg').trim() || '#f5f2ec',
         scale: Math.min(2, window.devicePixelRatio || 1),
         useCORS: true,
         logging: false,

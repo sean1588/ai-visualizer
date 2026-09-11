@@ -241,12 +241,14 @@ test("sample dashboard renders and exports a PNG", async () => {
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
     await page.getByText("SAAS METRICS").click();
     await page.waitForSelector("#chef-fab.is-visible");
+    await page.locator("#theme-picker").selectOption("marketing");
 
     const downloadPromise = page.waitForEvent("download");
     await page.locator("#export-btn").click();
     const download = await downloadPromise;
 
     assert.match(download.suggestedFilename(), /\.png$/);
+    assert.equal(await page.evaluate(() => window.__html2canvasOptions.backgroundColor), "#fafaf7");
     const text = await page.locator("body").innerText();
     assert.match(text, /102\.4k/);
     assert.match(text, /MRR Trend/);
@@ -1282,7 +1284,8 @@ async function withPage(fn, options = {}) {
 
 async function mockInference(page, chefRecipe = CHEF_WITHOUT_OBSERVATIONS, planRecipe = PLAN, onRequest = null) {
   await page.addInitScript(() => {
-    window.html2canvas = async function () {
+    window.html2canvas = async function (_, options) {
+      window.__html2canvasOptions = options;
       const canvas = document.createElement("canvas");
       canvas.width = 64;
       canvas.height = 64;
