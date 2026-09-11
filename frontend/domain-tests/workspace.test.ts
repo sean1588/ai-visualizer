@@ -41,8 +41,8 @@ test('dashboard backup parser rejects unrelated JSON', () => {
   assert.throws(() => parseDashboardBundle('{nope'), /not valid JSON/);
 });
 
-test('dashboard backup parser reconstructs nested state and disables imported refresh', () => {
-  const source = JSON.stringify({
+test('dashboard backup parser rejects malformed nested state', () => {
+  const malformed = JSON.stringify({
     kind: 'mise-dashboard-bundle',
     version: 1,
     dashboard: {
@@ -60,13 +60,45 @@ test('dashboard backup parser reconstructs nested state and disables imported re
       savedAt: 1,
     },
   });
+  assert.throws(() => parseDashboardBundle(malformed), /invalid focus filters/);
+});
+
+test('dashboard backup parser rejects recipes incompatible with their rows', () => {
+  const incompatible = JSON.stringify({
+    kind: 'mise-dashboard-bundle',
+    version: 1,
+    dashboard: {
+      title: 'Broken',
+      rows: [{ amount: 1 }],
+      recipe: {
+        title: 'Broken',
+        widgets: [{ type: 'kpi', span: 3, label: 'Missing', metric: 'missing', aggregate: 'last', value: '—', delta: null }],
+      },
+    },
+  });
+  assert.throws(() => parseDashboardBundle(incompatible), /not compatible with its saved rows/);
+});
+
+test('dashboard backup parser disables imported refresh without discarding valid state', () => {
+  const source = JSON.stringify({
+    kind: 'mise-dashboard-bundle',
+    version: 1,
+    dashboard: {
+      id: 'portable',
+      title: 'Imported',
+      rows: [{ amount: 1 }],
+      recipe: { title: 'Imported', widgets: [{ type: 'table', span: 12, title: 'Rows', limit: 10 }] },
+      dataSource: { type: 'http', url: 'https://example.com/data.json', refreshMinutes: 5 },
+      filters: [],
+      savedViews: [],
+      kpiGoals: [],
+      alerts: [],
+      dashboardNotes: '',
+      theme: 'mise',
+      savedAt: 1,
+    },
+  });
   const restored = parseDashboardBundle(source);
-  assert.deepEqual(restored.filters, []);
-  assert.deepEqual(restored.savedViews?.[0].filters, []);
-  assert.deepEqual(restored.kpiGoals, []);
-  assert.deepEqual(restored.alerts, []);
-  assert.equal(restored.dashboardNotes, '');
-  assert.equal(restored.theme, 'mise');
   assert.deepEqual(restored.dataSource, {
     type: 'http',
     url: 'https://example.com/data.json',

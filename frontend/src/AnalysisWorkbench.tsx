@@ -105,15 +105,20 @@ export default function AnalysisWorkbench({
   const operators = useMemo(() => filterOperators(selectedColumn), [selectedColumn]);
 
   useEffect(() => {
-    if (open) {
-      setNotesDraft(dashboardNotes);
-      window.setTimeout(() => ref.current?.querySelector<HTMLButtonElement>('.workbench-tabs button.active')?.focus(), 0);
-    }
+    if (open) setNotesDraft(dashboardNotes);
   }, [dashboardNotes, open]);
+
+  useEffect(() => {
+    if (open) window.setTimeout(() => ref.current?.querySelector<HTMLButtonElement>('.workbench-tabs button.active')?.focus(), 0);
+  }, [open]);
 
   useEffect(() => {
     if (importError) importErrorRef.current?.focus();
   }, [importError]);
+
+  useEffect(() => {
+    if (pendingImport) window.setTimeout(() => document.getElementById('confirm-dashboard-restore')?.focus(), 0);
+  }, [pendingImport]);
 
   useEffect(() => {
     if (!selectedColumn && schema[0]) {
@@ -257,7 +262,7 @@ export default function AnalysisWorkbench({
               <h3>Move the whole working plate.</h3>
               <p>Backups contain the rows, recipe, filters, goals, notes, source settings, and theme. Nothing is uploaded.</p>
               <div className="dialog-actions"><button id="export-dashboard-bundle" type="button" className="btn btn-ghost" onClick={onExport}>Download backup</button><button id="import-dashboard-bundle" type="button" className="btn btn-ghost" onClick={() => importRef.current?.click()}>Restore backup</button></div>
-              {pendingImport && <div id="backup-preview" className="backup-preview"><strong>{pendingImport.title}</strong><span>{pendingImport.rows.toLocaleString()} rows · saved {new Date(pendingImport.savedAt).toLocaleString()}</span><button type="button" className="btn btn-primary" onClick={() => {
+              {pendingImport && <div id="backup-preview" className="backup-preview" role="status" aria-live="polite"><strong>{pendingImport.title}</strong><span>{pendingImport.rows.toLocaleString()} rows · saved {new Date(pendingImport.savedAt).toLocaleString()}</span><button id="confirm-dashboard-restore" type="button" className="btn btn-primary" onClick={() => {
                 const error = onImport(pendingImport.source);
                 if (error) {
                   setImportError(error);

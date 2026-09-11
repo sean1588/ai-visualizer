@@ -457,6 +457,11 @@ test("coarse-pointer controls meet the 44px touch target baseline", async () => 
     await page.locator("#open-workbench").click();
     assert.ok(await page.locator(".workbench-tabs button").first().evaluate(element => element.getBoundingClientRect().height) >= 44);
     assert.ok(await page.locator("#focus-filter-form select").first().evaluate(element => element.getBoundingClientRect().height) >= 44);
+    await page.getByRole("button", { name: "Goals" }).click();
+    await page.locator("#kpi-goal-form input[name=target]").fill("100");
+    await page.locator("#kpi-goal-form button[type=submit]").click();
+    const goalRemove = page.locator("#kpi-goal-list article > button").first();
+    assert.ok(await goalRemove.evaluate(element => element.getBoundingClientRect().width) >= 44);
   }, { context: { hasTouch: true, viewport: devices["iPhone 14 Pro"].viewport } });
 });
 
@@ -809,6 +814,7 @@ test("analysis workbench keeps ten browser-local enhancements cohesive and persi
     await workbench.locator("#dashboard-notes").fill("Review Pro growth with finance.");
     await workbench.getByRole("button", { name: "Save context" }).click();
     assert.match(await page.locator("#dashboard-context").innerText(), /Review Pro growth with finance/i);
+    assert.equal(await page.evaluate(() => document.activeElement?.textContent?.trim()), "Save context");
 
     const downloadPromise = page.waitForEvent("download");
     await workbench.locator("#export-dashboard-bundle").click();
@@ -840,11 +846,21 @@ test("analysis workbench keeps ten browser-local enhancements cohesive and persi
       refreshMinutes: 5,
     };
     await workbench.locator("#dashboard-bundle-input").setInputFiles({
+      name: "corrupted.mise.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(backup)),
+    });
+    await page.waitForFunction(() => document.querySelector("#backup-import-error")?.textContent?.includes("invalid focus filters"));
+    assert.ok(await page.locator("#analysis-workbench[open]").count());
+    backup.dashboard.filters = [];
+    await workbench.locator("#dashboard-bundle-input").setInputFiles({
       name: "portable.mise.json",
       mimeType: "application/json",
       buffer: Buffer.from(JSON.stringify(backup)),
     });
     await workbench.locator("#backup-preview").waitFor();
+    await page.waitForFunction(() => document.activeElement?.id === "confirm-dashboard-restore");
+    assert.equal(await workbench.locator("#backup-preview").getAttribute("role"), "status");
     await workbench.getByRole("button", { name: "Restore this backup" }).click();
     await page.waitForFunction(() => !document.querySelector("#analysis-workbench")?.hasAttribute("open"));
     assert.match(await page.locator("#dash-title").innerText(), /Segment Workbench/i);

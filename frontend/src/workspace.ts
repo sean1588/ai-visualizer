@@ -9,6 +9,9 @@ import type {
   SchemaOverrides,
   ThresholdAlert,
 } from './domain';
+import { applyRecipeToRows } from './domain/recipes';
+import { applySchemaOverrides, inferSchema } from './domain/schema';
+import { widgetFingerprint } from './domain/widgets';
 import type { RecentDashboard } from './storage';
 
 export interface DashboardBundle {
@@ -25,6 +28,7 @@ const THEMES = new Set<DashboardTheme>(['mise', 'ink', 'ocean', 'plum', 'marketi
 const FILTER_OPERATORS = new Set(['equals', 'contains', 'at-least', 'at-most', 'after', 'before']);
 const KPI_AGGREGATES = new Set(['count', 'sum', 'average', 'last']);
 const COLUMN_TYPES = new Set(['string', 'category', 'number', 'date', 'object']);
+const WIDGET_TYPES = new Set(['kpi', 'line', 'bar', 'donut', 'statlist', 'countbar', 'table', 'observations']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -160,6 +164,66 @@ function sanitizeDataSource(value: unknown): DataSource | null {
   }
 }
 
+function validWidget(value: unknown): boolean {
+  if (!isRecord(value) || !WIDGET_TYPES.has(String(value.type))) return false;
+  if (value.type === 'kpi') return typeof value.metric === 'string';
+  if (value.type === 'line' || value.type === 'bar') return typeof value.x === 'string' && typeof value.y === 'string';
+  if (value.type === 'donut' || value.type === 'statlist') return typeof value.cat === 'string' && typeof value.metric === 'string';
+  if (value.type === 'countbar') return typeof value.cat === 'string';
+  if (value.type === 'table') return typeof value.limit === 'number' && Number.isFinite(value.limit);
+  return Array.isArray(value.observations) && value.observations.every(observation => typeof observation === 'string');
+}
+
+function assertRestorableState(dashboard: Record<string, unknown>): void {
+  const filters = dashboard.filters;
+  if (filters !== undefined) {
+    if (!Array.isArray(filters) || filters.length > 50 || sanitizeFilters(filters).length !== filters.length) {
+      throw new Error('That backup contains invalid focus filters.');
+    }
+  }
+  const views = dashboard.savedViews;
+  if (views !== undefined) {
+    if (!Array.isArray(views) || views.length > 30 || sanitizeViews(views).length !== views.length) {
+      throw new Error('That backup contains invalid saved views.');
+    }
+    for (const view of views) {
+      if (!isRecord(view) || !Array.isArray(view.filters) || sanitizeFilters(view.filters).length !== view.filters.length) {
+        throw new Error('That backup contains invalid saved-view filters.');
+      }
+    }
+  }
+  const goals = dashboard.kpiGoals;
+  if (goals !== undefined && (!Array.isArray(goals) || goals.length > 50 || sanitizeGoals(goals).length !== goals.length)) {
+    throw new Error('That backup contains invalid KPI goals.');
+  }
+  const alerts = dashboard.alerts;
+  if (alerts !== undefined && (!Array.isArray(alerts) || alerts.length > 50 || sanitizeAlerts(alerts).length !== alerts.length)) {
+    throw new Error('That backup contains invalid alerts.');
+  }
+  if (dashboard.dashboardNotes !== undefined && (typeof dashboard.dashboardNotes !== 'string' || dashboard.dashboardNotes.length > 4000)) {
+    throw new Error('That backup contains invalid dashboard context.');
+  }
+  if (dashboard.theme !== undefined && !THEMES.has(dashboard.theme as DashboardTheme)) {
+    throw new Error('That backup contains an unsupported theme.');
+  }
+  if (dashboard.dataSource !== undefined && dashboard.dataSource !== null && !sanitizeDataSource(dashboard.dataSource)) {
+    throw new Error('That backup contains an unsupported data source.');
+  }
+  if (dashboard.schemaOverrides !== undefined) {
+    if (!isRecord(dashboard.schemaOverrides) || Object.keys(sanitizeSchemaOverrides(dashboard.schemaOverrides)).length !== Object.keys(dashboard.schemaOverrides).length) {
+      throw new Error('That backup contains invalid schema overrides.');
+    }
+  }
+  if (dashboard.dataAudit !== undefined) {
+    if (!Array.isArray(dashboard.dataAudit) || dashboard.dataAudit.length > 100 || sanitizeAudit(dashboard.dataAudit).length !== dashboard.dataAudit.length) {
+      throw new Error('That backup contains an invalid audit trail.');
+    }
+  }
+  if (!isRecord(dashboard.recipe) || !Array.isArray(dashboard.recipe.widgets) || dashboard.recipe.widgets.length > 100 || !dashboard.recipe.widgets.every(validWidget)) {
+    throw new Error('That backup contains an invalid dashboard recipe.');
+  }
+}
+
 export function buildDashboardBundle(dashboard: RecentDashboard): DashboardBundle {
   return {
     kind: 'mise-dashboard-bundle',
@@ -192,6 +256,7 @@ export function parseDashboardBundle(source: string): RecentDashboard {
   }
   if (!dashboard.rows.length) throw new Error('That backup does not contain any rows.');
   if (dashboard.rows.length > MAX_ROWS) throw new Error(`That backup exceeds the ${MAX_ROWS.toLocaleString()} row restore limit.`);
+  assertRestorableState(dashboard);
   const rows = dashboard.rows.map(row => {
     if (!isRecord(row)) throw new Error('That backup contains an invalid row.');
     if (Object.keys(row).length > MAX_COLUMNS) throw new Error(`A backup row exceeds the ${MAX_COLUMNS} column restore limit.`);
@@ -202,6 +267,17 @@ export function parseDashboardBundle(source: string): RecentDashboard {
     title: shortString(dashboard.recipe.title, 160) || 'Imported dashboard',
     widgets: dashboard.recipe.widgets.slice(0, 100) as DashboardRecipe['widgets'],
   };
+  const schemaOverrides = sanitizeSchemaOverrides(dashboard.schemaOverrides);
+  const inferredSchema = applySchemaOverrides(inferSchema(rows), schemaOverrides);
+  const restoredRecipe = applyRecipeToRows(recipe, rows, inferredSchema, { dataSource: sanitizeDataSource(dashboard.dataSource) });
+  const importedFingerprints = recipe.widgets.map(widgetFingerprint);
+  const restoredFingerprints = restoredRecipe.widgets.map(widgetFingerprint);
+  if (
+    importedFingerprints.length !== restoredFingerprints.length
+    || importedFingerprints.some((fingerprint, index) => fingerprint !== restoredFingerprints[index])
+  ) {
+    throw new Error('That backup recipe is not compatible with its saved rows.');
+  }
   const theme = THEMES.has(dashboard.theme as DashboardTheme) ? dashboard.theme as DashboardTheme : 'mise';
   return {
     id: shortString(dashboard.id, 100) || `d_${now.toString(36)}`,
@@ -211,7 +287,7 @@ export function parseDashboardBundle(source: string): RecentDashboard {
     recipe,
     dataSource: sanitizeDataSource(dashboard.dataSource),
     parseHealth: null,
-    schemaOverrides: sanitizeSchemaOverrides(dashboard.schemaOverrides),
+    schemaOverrides,
     dataAudit: sanitizeAudit(dashboard.dataAudit),
     alerts: sanitizeAlerts(dashboard.alerts),
     theme,

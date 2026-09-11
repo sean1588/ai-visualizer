@@ -674,6 +674,7 @@ button.recent-card { width: 100%; color: inherit; text-align: left; font: inheri
 
 @media (pointer: coarse) {
   .btn, .widget-action, .assumption-chip, .widget-rationale > summary, .widget-edit > summary, .legend-button, .statlist-key, .recent-card, .example-open, .dialog-close, .workbench-tabs button, .active-filter-list button, .workbench-form input, .workbench-form select, .saved-view-panel input, #saved-view-list article > button, .goal-list article > button { min-height: 44px; }
+  #saved-view-list article > button:last-child, .goal-list article > button { min-width: 44px; }
 }
 
 @media (max-width: 640px) {
