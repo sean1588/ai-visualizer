@@ -441,6 +441,8 @@ function App() {
         pendingRecipe: null,
         id: null,
         changedWidgets: new Set(),
+        statusMessage: null,
+        statusError: false,
       },
     });
     persistSnapshot({ rows, schema, recipe, dataSource, parseHealth });
