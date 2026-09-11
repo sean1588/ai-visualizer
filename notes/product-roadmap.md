@@ -55,6 +55,13 @@ Static app responses require browser revalidation while CloudFront retains its
 optimized edge cache. Normal refreshes therefore pick up invalidated deployments
 without requiring users to empty their browser cache.
 
+### React and TypeScript foundation
+
+The frontend uses Vite, React, and strict TypeScript. Parsing, profiling,
+aggregation, recipes, formatting, and table behavior live in pure domain
+modules; the application reducer and components own interactive state. Vite
+emits content-hashed assets, and the PNG renderer is bundled as a lazy chunk.
+
 ## Next
 
 ### Recurring-report mode
@@ -129,9 +136,8 @@ to the current browser-local architecture:
 
 ### Maintainability
 
-- Keep the vanilla application, but split parsing/profiling, recipes, rendering,
-  persistence, Chef, and export into focused modules.
-- Move inline CSS into a static stylesheet.
+- Continue extracting feature components when the concepts have independent
+  state or behavior; avoid wrappers that only reduce line count.
 - Keep direct controls and AI edits on one canonical recipe contract.
 - Move larger saved rows from `localStorage` to IndexedDB when quota failures
   become observable.
@@ -143,7 +149,6 @@ to the current browser-local architecture:
 - Replace per-instance rate limiting with a shared control before promoting URL
   ingestion broadly.
 - Add CSP and other production response headers.
-- Vendor the PNG export dependency rather than loading executable code at runtime.
 
 ### Accessibility
 
@@ -165,5 +170,3 @@ chart inspection, Chef use, recurring refresh, and export type.
 - A template marketplace.
 - Full BI-style query building.
 - Hosted sharing as a shortcut around self-contained export.
-- A framework rewrite without evidence that the DOM architecture is the limiting
-  factor.
