@@ -421,6 +421,17 @@ test("mobile dashboard stacks without horizontal overflow and uses compact Chef 
   });
 });
 
+test("coarse-pointer controls meet the 44px touch target baseline", async () => {
+  await withPage(async page => {
+    await mockInference(page);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    assert.ok(await page.locator("#browse-btn").evaluate(element => element.getBoundingClientRect().height) >= 44);
+    await page.getByText("SAAS METRICS").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+    assert.ok(await page.locator(".assumption-chip").first().evaluate(element => element.getBoundingClientRect().height) >= 44);
+  }, { context: { hasTouch: true, viewport: devices["iPhone 14 Pro"].viewport } });
+});
+
 test("Chef accepts recoverable rendered-widget replies instead of surfacing invalid recipe", async () => {
   await withPage(async page => {
     await mockInference(page, RENDERED_SHAPE_CHEF);
@@ -1249,7 +1260,7 @@ test("compact numbers never print 1000B for just-under-a-trillion values", async
 
 async function withPage(fn, options = {}) {
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ acceptDownloads: true, viewport: { width: 1440, height: 1100 } });
+  const page = await browser.newPage({ acceptDownloads: true, viewport: { width: 1440, height: 1100 }, ...(options.context || {}) });
   const messages = [];
   page.on("console", msg => {
     if (["error", "warning"].includes(msg.type())) messages.push(`${msg.type()}: ${msg.text()}`);
