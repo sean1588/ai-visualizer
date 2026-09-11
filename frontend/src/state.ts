@@ -1,6 +1,7 @@
 import type {
   DashboardRecipe,
   DataSource,
+  DatasetSnapshot,
   ParseHealth,
   RenderedWidget,
   Row,
@@ -37,12 +38,15 @@ export interface AppState {
   sourceText: string;
   notes: string;
   parseHealth: ParseHealth | null;
+  previousSnapshot: DatasetSnapshot | null;
+  updatedAt: number | null;
   pendingRecipe: DashboardRecipe<unknown> | null;
   excludeOutliers: boolean;
   recents: RecentDashboard[];
   error: string;
   statusMessage: string | null;
   statusError: boolean;
+  refreshing: boolean;
   loadingSteps: Record<LoadingStep, StepStatus>;
   loadingLabel: string;
   chefOpen: boolean;
@@ -72,12 +76,15 @@ export function createInitialState(recents: RecentDashboard[] = []): AppState {
     sourceText: '',
     notes: '',
     parseHealth: null,
+    previousSnapshot: null,
+    updatedAt: null,
     pendingRecipe: null,
     excludeOutliers: true,
     recents,
     error: '',
     statusMessage: null,
     statusError: false,
+    refreshing: false,
     loadingSteps: { ...initialSteps },
     loadingLabel: 'data · — rows · — cols',
     chefOpen: false,

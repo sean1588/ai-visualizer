@@ -62,8 +62,6 @@ aggregation, recipes, formatting, and table behavior live in pure domain
 modules; the application reducer and components own interactive state. Vite
 emits content-hashed assets, and the PNG renderer is bundled as a lazy chunk.
 
-## Next
-
 ### Recurring-report mode
 
 - Replace a dashboard's data while preserving its recipe.
@@ -71,6 +69,8 @@ emits content-hashed assets, and the PNG renderer is bundled as a lazy chunk.
 - Highlight changed metrics and schema drift.
 - Add manual and while-open refresh cadences for HTTP sources.
 - Show fetched-at time and stale/error state.
+
+## Next
 
 ### No-custody sharing
 

@@ -2,6 +2,7 @@ export * from './aggregation.ts';
 export * from './formatting.ts';
 export * from './parsing.ts';
 export * from './profiles.ts';
+export * from './recurring.ts';
 export * from './recipes.ts';
 export * from './schema.ts';
 export * from './table.ts';

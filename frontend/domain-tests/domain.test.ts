@@ -7,7 +7,9 @@ import {
   buildDataProfile,
   buildParseHealth,
   buildRecipePayload,
+  captureDatasetSnapshot,
   chooseGroupMode,
+  compareDatasets,
   computeKpiFromValues,
   contributingRows,
   deterministicRecipe,
@@ -19,8 +21,10 @@ import {
   parseAndValidateRecipe,
   parseCsvRecords,
   parseJsonRecords,
+  refreshCadence,
   seriesBy,
   sortTableRows,
+  sourceFreshness,
   toCanonicalWidgets,
   validateRecipe,
   widgetFingerprint,
@@ -266,6 +270,81 @@ test('widget fingerprints, diffs, and contributing rows preserve selection seman
     { region: 'east', revenue: 20 },
   ];
   assert.deepEqual(contributingRows(widget, 'west', rows), [{ region: 'west', revenue: 10 }]);
+});
+
+test('recurring snapshots compare KPI values, row counts, and schema drift compactly', () => {
+  const previousRows: Row[] = [
+    { date: '2026-01-01', revenue: 10, customers: 2, legacy: 'yes' },
+    { date: '2026-01-02', revenue: 20, customers: 3, legacy: 'no' },
+  ];
+  const previousSchema = inferSchema(previousRows);
+  const snapshot = captureDatasetSnapshot(previousRows, previousSchema, 1_000);
+  assert.equal('rows' in snapshot, false);
+  assert.deepEqual(snapshot.metrics.revenue, {
+    count: 2,
+    sum: 30,
+    average: 15,
+    last: 20,
+  });
+
+  const currentRows: Row[] = [
+    { date: '2026-02-01', revenue: 30, customers: 'small', margin: 0.2 },
+    { date: '2026-02-02', revenue: 40, customers: 'large', margin: 0.3 },
+    { date: '2026-02-03', revenue: 50, customers: 'large', margin: 0.4 },
+  ];
+  const currentSchema = inferSchema(currentRows);
+  const recipe: DashboardRecipe = {
+    title: 'Recurring revenue',
+    widgets: [{
+      type: 'kpi',
+      span: 3,
+      label: 'Revenue',
+      metric: 'revenue',
+      value: '120',
+      delta: null,
+      aggregate: 'sum',
+      format: 'currency',
+    }],
+  };
+  const comparison = compareDatasets(snapshot, currentRows, currentSchema, recipe);
+  assert.equal(comparison.rowDelta, 1);
+  assert.deepEqual(comparison.schema.added, ['margin']);
+  assert.deepEqual(comparison.schema.removed, ['legacy']);
+  assert.deepEqual(comparison.schema.changed, [{ name: 'customers', before: 'number', after: 'category' }]);
+  assert.deepEqual(comparison.kpis[0], {
+    fingerprint: 'kpi:revenue:sum:currency:Revenue',
+    label: 'Revenue',
+    metric: 'revenue',
+    aggregate: 'sum',
+    format: 'currency',
+    previous: 30,
+    current: 120,
+    absoluteChange: 90,
+    percentChange: 300,
+  });
+});
+
+test('HTTP freshness uses persisted cadence, attempts, and errors', () => {
+  const fetchedAt = '2026-09-11T00:00:00.000Z';
+  const source = { type: 'http', fetchedAt, refreshMinutes: 15 };
+  assert.equal(refreshCadence(source), 15);
+  assert.deepEqual(sourceFreshness(source, Date.parse('2026-09-11T00:14:00.000Z')), {
+    status: 'fresh',
+    fetchedAt: Date.parse(fetchedAt),
+    nextRefreshAt: Date.parse('2026-09-11T00:15:00.000Z'),
+    error: null,
+  });
+  assert.equal(sourceFreshness(source, Date.parse('2026-09-11T00:15:00.000Z')).status, 'stale');
+  assert.deepEqual(sourceFreshness({
+    ...source,
+    lastAttemptAt: '2026-09-11T00:16:00.000Z',
+    lastError: 'upstream unavailable',
+  }, Date.parse('2026-09-11T00:17:00.000Z')), {
+    status: 'error',
+    fetchedAt: Date.parse(fetchedAt),
+    nextRefreshAt: Date.parse('2026-09-11T00:31:00.000Z'),
+    error: 'upstream unavailable',
+  });
 });
 
 test('recipe payload construction is deterministic and rehydration is global-free', () => {

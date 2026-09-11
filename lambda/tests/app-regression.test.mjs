@@ -536,14 +536,100 @@ test("HTTP source dashboards save a refreshable URL and refresh without re-plann
     text = await page.locator("body").innerText();
     assert.match(text, /150k/);
     assert.match(text, /bar · 3 groups/i);
+    assert.match(text, /Since previous data/i);
+    assert.match(text, /\+1 rows/i);
+    assert.match(text, /Schema unchanged/i);
+    assert.match(text, /Fetched just now/i);
     assert.equal(fetchCalls, 2);
     assert.equal(cookCalls, 1);
 
+    await page.locator("#refresh-cadence").selectOption("5");
     await page.reload({ waitUntil: "networkidle" });
     await page.getByText("Segment Revenue").first().click();
     await page.waitForSelector("#chef-fab.is-visible");
     assert.equal(await page.locator("#refresh-btn").isEnabled(), true);
+    assert.equal(await page.locator("#refresh-cadence").inputValue(), "5");
+    assert.match(await page.locator("#dataset-comparison").innerText(), /Since previous data/i);
   });
+});
+
+test("local dashboards replace data against the same recipe and report schema drift", async () => {
+  await withPage(async page => {
+    let cookCalls = 0;
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, AGGREGATE_PLAN, () => { cookCalls++; });
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#paste").fill(JSON.stringify(SEGMENT_REVENUE));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    const replacement = [
+      { segment: "startup", revenue: 20000, gross_margin: 0.72 },
+      { segment: "midmarket", revenue: 40000, gross_margin: 0.76 },
+      { segment: "enterprise", revenue: 90000, gross_margin: 0.81 },
+      { segment: "enterprise", revenue: 30000, gross_margin: 0.83 },
+    ];
+    await page.locator("#replacement-input").setInputFiles({
+      name: "next-period.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(replacement)),
+    });
+    await page.waitForFunction(() => document.body.innerText.includes("180k"));
+
+    const text = await page.locator("body").innerText();
+    assert.match(text, /Segment Revenue/);
+    assert.match(text, /Since previous data/i);
+    assert.match(text, /-1 rows/i);
+    assert.match(text, /2 schema changes/i);
+    assert.match(text, /added gross_margin/i);
+    assert.match(text, /removed channel/i);
+    assert.match(text, /\+60k/);
+    assert.match(text, /vs previous dataset/i);
+    assert.equal(cookCalls, 1);
+    assert.equal(await page.locator("#refresh-btn").isEnabled(), false);
+
+    await page.reload({ waitUntil: "networkidle" });
+    await page.getByText("Segment Revenue").first().click();
+    assert.match(await page.locator("#dataset-comparison").innerText(), /added gross_margin/i);
+  });
+});
+
+test("HTTP refresh failures remain visible without replacing good rows", async () => {
+  await withPage(async page => {
+    let fetchCalls = 0;
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, AGGREGATE_PLAN);
+    await page.route("**/api/fetch-data", async route => {
+      fetchCalls++;
+      if (fetchCalls > 1) {
+        await route.fulfill({
+          status: 502,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "upstream_failed", detail: "source unavailable" }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          text: JSON.stringify(SEGMENT_REVENUE),
+          contentType: "application/json",
+          finalUrl: "https://example.test/revenue.json",
+        }),
+      });
+    });
+
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#http-url").fill("https://example.test/revenue.json");
+    await page.locator("#fetch-url-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+    await page.locator("#refresh-btn").click();
+    await page.waitForSelector("#refresh-error");
+
+    assert.match(await page.locator("#refresh-error").innerText(), /upstream_failed.*source unavailable/i);
+    assert.match(await page.locator("body").innerText(), /120k/);
+    await page.waitForTimeout(2300);
+    assert.match(await page.locator("#status-pill").innerText(), /HTTP · refresh error/i);
+  }, { allowConsole: /\[refresh\] failed/ });
 });
 
 test("applying an HTTP recipe to pasted CSV does not advertise refresh", async () => {
