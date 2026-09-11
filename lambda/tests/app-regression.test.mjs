@@ -1072,12 +1072,15 @@ test("local dashboards replace data against the same recipe and report schema dr
     await workbench.locator("#focus-filter-form button[type=submit]").click();
     await workbench.locator(".dialog-close").click();
     assert.equal(await page.locator(".dataset-delta").count(), 0);
+    assert.equal(await page.locator("#dataset-comparison").count(), 0);
     await page.locator("#open-brief").click();
     assert.doesNotMatch(await page.locator("#executive-brief-dialog").innerText(), /from the previous dataset/i);
     await page.locator("#executive-brief-dialog .dialog-close").click();
 
     await page.reload({ waitUntil: "networkidle" });
     await page.getByText("Segment Revenue").first().click();
+    assert.equal(await page.locator("#dataset-comparison").count(), 0);
+    await page.locator("#focus-summary button").click();
     assert.match(await page.locator("#dataset-comparison").innerText(), /added gross_margin/i);
   });
 });

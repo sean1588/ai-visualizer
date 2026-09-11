@@ -1712,7 +1712,7 @@ function App() {
                 </details>
               </div>
             </div>
-            <RecurringReportSummary state={state} comparison={comparison} now={clock} onCadence={setRefreshCadence} />
+            <RecurringReportSummary state={state} comparison={state.filters.length ? null : comparison} now={clock} onCadence={setRefreshCadence} />
             {focusedRows.length ? <WidgetGrid
               recipe={state.recipe}
               rows={focusedRows}
