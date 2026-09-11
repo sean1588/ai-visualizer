@@ -1493,14 +1493,6 @@ function App() {
       const kpiGoals = (imported.kpiGoals || []).filter(goal => columns.has(goal.metric));
       const alerts = (imported.alerts || []).filter(alert => columns.has(alert.metric));
       const recipe = applyRecipeToRows(imported.recipe, imported.rows, schema, { dataSource: imported.dataSource });
-      const importedFingerprints = imported.recipe.widgets.map(widgetFingerprint);
-      const restoredFingerprints = recipe.widgets.map(widgetFingerprint);
-      if (
-        importedFingerprints.length !== restoredFingerprints.length
-        || importedFingerprints.some((fingerprint, index) => fingerprint !== restoredFingerprints[index])
-      ) {
-        throw new Error('That backup recipe is not compatible with its saved rows.');
-      }
       const dashboard: RecentDashboard = {
         ...imported,
         id: `d_${Date.now().toString(36)}`,

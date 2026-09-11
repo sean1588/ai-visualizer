@@ -6,12 +6,11 @@ import type {
   DataSource,
   KpiGoal,
   SavedDashboardView,
+  SchemaColumn,
   SchemaOverrides,
   ThresholdAlert,
 } from './domain';
-import { applyRecipeToRows } from './domain/recipes.ts';
 import { applySchemaOverrides, inferSchema } from './domain/schema.ts';
-import { widgetFingerprint } from './domain/widgets.ts';
 import type { RecentDashboard } from './storage';
 
 export interface DashboardBundle {
@@ -174,6 +173,25 @@ function validWidget(value: unknown): boolean {
   return Array.isArray(value.observations) && value.observations.every(observation => typeof observation === 'string');
 }
 
+function recipeMatchesSchema(recipe: DashboardRecipe, schema: readonly SchemaColumn[]): boolean {
+  const columns = new Map(schema.map(column => [column.name, column]));
+  return recipe.widgets.every(widget => {
+    if (widget.type === 'kpi') return columns.get(widget.metric)?.type === 'number';
+    if (widget.type === 'line') return columns.get(widget.x)?.type === 'date' && columns.get(widget.y)?.type === 'number';
+    if (widget.type === 'bar') return columns.has(widget.x) && columns.get(widget.y)?.type === 'number';
+    if (widget.type === 'donut' || widget.type === 'statlist') {
+      const category = columns.get(widget.cat);
+      return !!category && category.type !== 'number' && category.type !== 'object' && columns.get(widget.metric)?.type === 'number';
+    }
+    if (widget.type === 'countbar') {
+      const category = columns.get(widget.cat);
+      return !!category && category.type !== 'number' && category.type !== 'object';
+    }
+    if (widget.type === 'table') return !widget.sort || columns.has(widget.sort);
+    return widget.type === 'observations';
+  });
+}
+
 function assertRestorableState(dashboard: Record<string, unknown>): void {
   const filters = dashboard.filters;
   if (filters !== undefined) {
@@ -269,13 +287,7 @@ export function parseDashboardBundle(source: string): RecentDashboard {
   };
   const schemaOverrides = sanitizeSchemaOverrides(dashboard.schemaOverrides);
   const inferredSchema = applySchemaOverrides(inferSchema(rows), schemaOverrides);
-  const restoredRecipe = applyRecipeToRows(recipe, rows, inferredSchema, { dataSource: sanitizeDataSource(dashboard.dataSource) });
-  const importedFingerprints = recipe.widgets.map(widgetFingerprint);
-  const restoredFingerprints = restoredRecipe.widgets.map(widgetFingerprint);
-  if (
-    importedFingerprints.length !== restoredFingerprints.length
-    || importedFingerprints.some((fingerprint, index) => fingerprint !== restoredFingerprints[index])
-  ) {
+  if (!recipeMatchesSchema(recipe, inferredSchema)) {
     throw new Error('That backup recipe is not compatible with its saved rows.');
   }
   const theme = THEMES.has(dashboard.theme as DashboardTheme) ? dashboard.theme as DashboardTheme : 'mise';
