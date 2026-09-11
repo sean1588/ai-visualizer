@@ -1,14 +1,17 @@
 import type {
   DashboardRecipe,
   DashboardTheme,
+  DashboardFilter,
   DataAuditEntry,
   DataSource,
   DatasetSnapshot,
+  KpiGoal,
   ParseHealth,
   RenderedWidget,
   Row,
   SchemaColumn,
   SchemaOverrides,
+  SavedDashboardView,
   ThresholdAlert,
 } from './domain';
 import type { RecentDashboard } from './storage';
@@ -76,6 +79,12 @@ export interface AppState {
   alertsOpen: boolean;
   alerts: ThresholdAlert[];
   theme: DashboardTheme;
+  filters: DashboardFilter[];
+  savedViews: SavedDashboardView[];
+  kpiGoals: KpiGoal[];
+  dashboardNotes: string;
+  workbenchOpen: boolean;
+  presentationMode: boolean;
 }
 
 export const initialSteps: Record<LoadingStep, StepStatus> = {
@@ -125,6 +134,12 @@ export function createInitialState(recents: RecentDashboard[] = []): AppState {
     alertsOpen: false,
     alerts: [],
     theme: 'mise',
+    filters: [],
+    savedViews: [],
+    kpiGoals: [],
+    dashboardNotes: '',
+    workbenchOpen: false,
+    presentationMode: false,
   };
 }
 

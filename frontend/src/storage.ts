@@ -1,11 +1,14 @@
 import type {
   DashboardRecipe,
   DashboardTheme,
+  DashboardFilter,
   DataAuditEntry,
   DataSource,
   DatasetSnapshot,
+  KpiGoal,
   ParseHealth,
   Row,
+  SavedDashboardView,
   SchemaColumn,
   SchemaOverrides,
   ThresholdAlert,
@@ -27,6 +30,10 @@ export interface RecentDashboard {
   dataAudit?: DataAuditEntry[];
   alerts?: ThresholdAlert[];
   theme?: DashboardTheme;
+  filters?: DashboardFilter[];
+  savedViews?: SavedDashboardView[];
+  kpiGoals?: KpiGoal[];
+  dashboardNotes?: string;
   previousSnapshot?: DatasetSnapshot | null;
   updatedAt?: number;
   savedAt: number;

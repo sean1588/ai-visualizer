@@ -10,3 +10,4 @@ export * from './sources.ts';
 export * from './table.ts';
 export * from './types.ts';
 export * from './widgets.ts';
+export * from './workbench.ts';

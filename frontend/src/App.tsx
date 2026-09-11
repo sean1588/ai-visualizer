@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import {
+  applyDashboardFilters,
   applySchemaOverrides,
   applyRecipeToRows,
   buildDataProfile,
@@ -15,6 +16,7 @@ import {
   deterministicRecipe,
   diffWidgets,
   evaluateAlerts,
+  evaluateKpiGoals,
   flattenRows,
   formatCompact,
   formatFull,
@@ -39,6 +41,7 @@ import {
   validateRecipe,
   widgetFingerprint,
   type DashboardRecipe,
+  type DashboardFilter,
   type DashboardTheme,
   type DataAuditEntry,
   type DataHealthIssue,
@@ -46,12 +49,15 @@ import {
   type DatasetComparison,
   type DatasetSnapshot,
   type NumberFormat,
+  type KpiGoal,
   type RenderedWidget,
   type Row,
   type SchemaColumn,
+  type SavedDashboardView,
   type TableWidget,
   type ThresholdAlert,
 } from './domain';
+import AnalysisWorkbench from './AnalysisWorkbench';
 import DataHealthDialog from './DataHealth';
 import ExampleGallery from './ExampleGallery';
 import { EXAMPLE_PLATES, type ExamplePlate } from './examples';
@@ -63,6 +69,7 @@ import { appReducer, createInitialState, initialSteps, type AppState, type ChefM
 import { clearRecents, loadRecents, migrateLegacyStorage, relativeTime, saveRecent, type RecentDashboard } from './storage';
 import { track } from './telemetry';
 import WidgetGrid from './WidgetGrid';
+import { buildDashboardBundle, parseDashboardBundle } from './workspace';
 
 declare global {
   interface Window {
@@ -470,6 +477,7 @@ function App() {
   const stateRef = useRef(state);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replacementInputRef = useRef<HTMLInputElement>(null);
+  const presentationReturnFocus = useRef<HTMLElement | null>(null);
   const statusTimer = useRef<number | null>(null);
   const refreshInFlight = useRef(false);
   const [pasteText, setPasteText] = useState('');
@@ -512,6 +520,12 @@ function App() {
           briefOpen: false,
           recipeInspectorOpen: false,
           alertsOpen: false,
+          filters: [],
+          savedViews: [],
+          kpiGoals: [],
+          dashboardNotes: '',
+          workbenchOpen: false,
+          presentationMode: false,
         },
       });
     };
@@ -529,6 +543,21 @@ function App() {
   useEffect(() => {
     document.body.dataset.theme = state.theme;
   }, [state.theme]);
+
+  useEffect(() => {
+    document.body.classList.toggle('presentation-mode', state.presentationMode);
+    if (!state.presentationMode) return;
+    const focusTimer = window.setTimeout(() => document.getElementById('exit-presentation')?.focus(), 0);
+    const exit = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') dispatch({ type: 'patch', value: { presentationMode: false } });
+    };
+    window.addEventListener('keydown', exit);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener('keydown', exit);
+      window.setTimeout(() => presentationReturnFocus.current?.isConnected && presentationReturnFocus.current.focus(), 0);
+    };
+  }, [state.presentationMode]);
 
   const flashStatus = useCallback((message: string, error = false) => {
     if (statusTimer.current) window.clearTimeout(statusTimer.current);
@@ -549,6 +578,10 @@ function App() {
     dataAudit?: DataAuditEntry[];
     alerts?: ThresholdAlert[];
     theme?: DashboardTheme;
+    filters?: DashboardFilter[];
+    savedViews?: SavedDashboardView[];
+    kpiGoals?: KpiGoal[];
+    dashboardNotes?: string;
     previousSnapshot: DatasetSnapshot | null;
     updatedAt: number;
     id?: string | null;
@@ -566,6 +599,10 @@ function App() {
       dataAudit: snapshot.dataAudit ?? stateRef.current.dataAudit,
       alerts: snapshot.alerts ?? stateRef.current.alerts,
       theme: snapshot.theme ?? stateRef.current.theme,
+      filters: snapshot.filters ?? stateRef.current.filters,
+      savedViews: snapshot.savedViews ?? stateRef.current.savedViews,
+      kpiGoals: snapshot.kpiGoals ?? stateRef.current.kpiGoals,
+      dashboardNotes: snapshot.dashboardNotes ?? stateRef.current.dashboardNotes,
       previousSnapshot: snapshot.previousSnapshot,
       updatedAt: snapshot.updatedAt,
       savedAt: Date.now(),
@@ -666,11 +703,31 @@ function App() {
         changedWidgets: new Set(),
         recipeHistory: [recipeRevision(recipe, 'Initial dashboard')],
         recipeHistoryIndex: 0,
+        filters: [],
+        savedViews: [],
+        kpiGoals: [],
+        dashboardNotes: options.notes ?? notes,
+        workbenchOpen: false,
+        presentationMode: false,
         statusMessage: null,
         statusError: false,
       },
     });
-    persistSnapshot({ rows, schema, recipe, dataSource, parseHealth, schemaOverrides, dataAudit, previousSnapshot: null, updatedAt });
+    persistSnapshot({
+      rows,
+      schema,
+      recipe,
+      dataSource,
+      parseHealth,
+      schemaOverrides,
+      dataAudit,
+      filters: [],
+      savedViews: [],
+      kpiGoals: [],
+      dashboardNotes: options.notes ?? notes,
+      previousSnapshot: null,
+      updatedAt,
+    });
     track('dashboard_rendered', { source: ingestSource, fallback: !!recipe.fallback, widgets: recipe.widgets.length });
   }, [flashStatus, notes, pasteText, persistSnapshot]);
 
@@ -990,7 +1047,7 @@ function App() {
         title: current.recipe.title,
         dashboardHtml: clone.outerHTML,
         css: pageCssText(),
-        rows: current.rows,
+        rows: applyDashboardFilters(current.rows, current.filters, current.schema),
         schema: current.schema,
         recipe: current.recipe,
         theme: current.theme,
@@ -1032,7 +1089,8 @@ function App() {
 
   const exportTable = useCallback((widget: TableWidget) => {
     const current = stateRef.current;
-    const rows = sortTableRows(current.rows, current.schema, widget);
+    const focused = applyDashboardFilters(current.rows, current.filters, current.schema);
+    const rows = sortTableRows(focused, current.schema, widget);
     const header = current.schema.map(column => csvEscape(column.name)).join(',');
     const body = rows.map(row => current.schema.map(column => csvEscape(row[column.name])).join(',')).join('\n');
     downloadFile(exportFilename('table', 'csv'), new Blob([`${header}\n${body}\n`], { type: 'text/csv;charset=utf-8' }));
@@ -1042,7 +1100,8 @@ function App() {
 
   const copyTable = useCallback(async (widget: TableWidget) => {
     const current = stateRef.current;
-    const rows = sortTableRows(current.rows, current.schema, widget);
+    const focused = applyDashboardFilters(current.rows, current.filters, current.schema);
+    const rows = sortTableRows(focused, current.schema, widget);
     const header = `| ${current.schema.map(column => humanize(column.name)).join(' | ')} |`;
     const separator = `| ${current.schema.map(() => '---').join(' | ')} |`;
     const body = rows.map(row => `| ${current.schema.map(column => {
@@ -1178,6 +1237,23 @@ function App() {
     flashStatus(`${theme === 'mise' ? 'Mise' : humanize(theme)} theme applied`);
   }, [flashStatus, persistSnapshot]);
 
+  const updateWorkbench = useCallback((value: Partial<Pick<AppState, 'filters' | 'savedViews' | 'kpiGoals' | 'dashboardNotes'>>) => {
+    const current = stateRef.current;
+    if (!current.recipe) return;
+    dispatch({ type: 'patch', value });
+    persistSnapshot({
+      rows: current.rows,
+      schema: current.schema,
+      recipe: current.recipe,
+      dataSource: current.dataSource,
+      parseHealth: current.parseHealth,
+      previousSnapshot: current.previousSnapshot,
+      updatedAt: current.updatedAt || Date.now(),
+      id: current.id,
+      ...value,
+    });
+  }, [persistSnapshot]);
+
   const copyExecutiveBrief = useCallback(async (markdown: string) => {
     try {
       await navigator.clipboard.writeText(markdown);
@@ -1245,7 +1321,8 @@ function App() {
 
   const openInspector = useCallback((widget: RenderedWidget, selectedValue: unknown | null) => {
     const current = stateRef.current;
-    dispatch({ type: 'patch', value: { inspector: { widget, selectedValue, rows: contributingRows(widget, selectedValue, current.rows) } } });
+    const rows = applyDashboardFilters(current.rows, current.filters, current.schema);
+    dispatch({ type: 'patch', value: { inspector: { widget, selectedValue, rows: contributingRows(widget, selectedValue, rows) } } });
     track('chart_inspected', { widgetType: widget.type });
   }, []);
 
@@ -1331,7 +1408,9 @@ function App() {
   const restoreRecent = useCallback((recent: RecentDashboard) => {
     setPasteText('');
     setChefInput('');
-    const schemaOverrides = recent.schemaOverrides || {};
+    const schemaOverrides = recent.schemaOverrides && typeof recent.schemaOverrides === 'object' && !Array.isArray(recent.schemaOverrides)
+      ? recent.schemaOverrides
+      : {};
     const schema = applySchemaOverrides(inferSchema(recent.rows), schemaOverrides);
     const parseHealth = buildParseHealth(
       recent.rows,
@@ -1350,9 +1429,15 @@ function App() {
         dataSource: recent.dataSource || null,
         parseHealth,
         schemaOverrides,
-        dataAudit: recent.dataAudit || stampAudit(parseHealth.audit),
-        alerts: recent.alerts || [],
+        dataAudit: Array.isArray(recent.dataAudit) ? recent.dataAudit : stampAudit(parseHealth.audit),
+        alerts: Array.isArray(recent.alerts) ? recent.alerts : [],
         theme: recent.theme || 'mise',
+        filters: Array.isArray(recent.filters) ? recent.filters : [],
+        savedViews: Array.isArray(recent.savedViews) ? recent.savedViews : [],
+        kpiGoals: Array.isArray(recent.kpiGoals) ? recent.kpiGoals : [],
+        dashboardNotes: typeof recent.dashboardNotes === 'string' ? recent.dashboardNotes : '',
+        workbenchOpen: false,
+        presentationMode: false,
         previousSnapshot: recent.previousSnapshot || null,
         updatedAt: recent.updatedAt || recent.savedAt,
         chefHistory: [],
@@ -1364,6 +1449,81 @@ function App() {
       },
     });
   }, []);
+
+  const exportDashboardBundle = useCallback(() => {
+    const current = stateRef.current;
+    if (!current.recipe) return;
+    const dashboard: RecentDashboard = {
+      id: current.id || `d_${Date.now().toString(36)}`,
+      title: current.recipe.title,
+      rows: current.rows,
+      schema: current.schema,
+      recipe: current.recipe,
+      dataSource: current.dataSource,
+      parseHealth: current.parseHealth,
+      schemaOverrides: current.schemaOverrides,
+      dataAudit: current.dataAudit,
+      alerts: current.alerts,
+      theme: current.theme,
+      filters: current.filters,
+      savedViews: current.savedViews,
+      kpiGoals: current.kpiGoals,
+      dashboardNotes: current.dashboardNotes,
+      previousSnapshot: current.previousSnapshot,
+      updatedAt: current.updatedAt || Date.now(),
+      savedAt: Date.now(),
+      cols: current.schema.length,
+    };
+    const bundle = buildDashboardBundle(dashboard);
+    downloadFile(exportFilename(current.recipe.title, 'mise.json'), new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' }));
+    flashStatus('Dashboard backup exported');
+  }, [flashStatus]);
+
+  const importDashboardBundle = useCallback((source: string) => {
+    try {
+      const imported = parseDashboardBundle(source);
+      const schemaOverrides = imported.schemaOverrides || {};
+      const schema = applySchemaOverrides(inferSchema(imported.rows), schemaOverrides);
+      const columns = new Set(schema.map(column => column.name));
+      const filters = (imported.filters || []).filter(filter => columns.has(filter.column));
+      const savedViews = (imported.savedViews || []).map(view => ({
+        ...view,
+        filters: view.filters.filter(filter => columns.has(filter.column)),
+      }));
+      const kpiGoals = (imported.kpiGoals || []).filter(goal => columns.has(goal.metric));
+      const alerts = (imported.alerts || []).filter(alert => columns.has(alert.metric));
+      const recipe = applyRecipeToRows(imported.recipe, imported.rows, schema, { dataSource: imported.dataSource });
+      const dashboard: RecentDashboard = {
+        ...imported,
+        id: `d_${Date.now().toString(36)}`,
+        title: recipe.title,
+        schema,
+        recipe,
+        parseHealth: buildParseHealth(imported.rows, schema, imported.parseHealth || {
+          rowsParsed: imported.rows.length,
+          rowsDropped: 0,
+          format: 'unknown',
+        }),
+        schemaOverrides,
+        filters,
+        savedViews,
+        kpiGoals,
+        alerts,
+        savedAt: Date.now(),
+        updatedAt: imported.updatedAt || Date.now(),
+        cols: schema.length,
+      };
+      saveRecent(dashboard);
+      restoreRecent(dashboard);
+      dispatch({ type: 'patch', value: { recents: loadRecents(), workbenchOpen: false } });
+      flashStatus('Dashboard backup restored');
+      return null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not restore that backup';
+      flashStatus(message, true);
+      return message;
+    }
+  }, [flashStatus, restoreRecent]);
 
   useEffect(() => {
     window.reset = reset;
@@ -1403,17 +1563,25 @@ function App() {
     window.__mise = bridge;
   }, [reset]);
 
+  const focusedRows = useMemo(
+    () => applyDashboardFilters(state.rows, state.filters, state.schema),
+    [state.filters, state.rows, state.schema],
+  );
   const comparison = useMemo(() => {
     if (!state.previousSnapshot || !state.recipe) return null;
     return compareDatasets(state.previousSnapshot, state.rows, state.schema, state.recipe);
   }, [state.previousSnapshot, state.recipe, state.rows, state.schema]);
   const executiveBrief = useMemo(() => {
     if (!state.recipe) return null;
-    return buildExecutiveBrief(state.recipe, state.rows, state.schema, comparison, state.parseHealth);
-  }, [comparison, state.parseHealth, state.recipe, state.rows, state.schema]);
+    return buildExecutiveBrief(state.recipe, focusedRows, state.schema, state.filters.length ? null : comparison, state.parseHealth);
+  }, [comparison, focusedRows, state.filters.length, state.parseHealth, state.recipe, state.schema]);
   const alertEvaluations = useMemo(
     () => evaluateAlerts(state.alerts, state.rows, state.schema),
     [state.alerts, state.rows, state.schema],
+  );
+  const kpiGoalEvaluations = useMemo(
+    () => evaluateKpiGoals(state.kpiGoals, focusedRows, state.schema, { excludeOutliers: state.excludeOutliers }),
+    [focusedRows, state.excludeOutliers, state.kpiGoals, state.schema],
   );
   const triggeredAlerts = alertEvaluations.filter(alert => alert.triggered).length;
   const health = state.parseHealth;
@@ -1439,6 +1607,7 @@ function App() {
           <button id="export-btn" className="btn btn-ghost" disabled={!state.recipe} onClick={() => void exportPng()}>Export PNG ↓</button>
         </div>
       </header>
+      {state.presentationMode && <button id="exit-presentation" className="btn btn-primary presentation-exit" type="button" onClick={() => dispatch({ type: 'patch', value: { presentationMode: false } })}>Exit presentation</button>}
 
       <section id="stage-empty" className={`stage ${state.stage === 'empty' ? 'is-active' : ''}`}>
         <div className="empty-body"><div className="empty-card">
@@ -1511,6 +1680,8 @@ function App() {
               <div id="dash-meta" className="dash-head-meta">
                 {state.rows.length} rows · {state.schema.length} cols · updated {new Date(state.updatedAt || Date.now()).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
               </div>
+              {!!state.filters.length && <div id="focus-summary" className="focus-summary"><strong>Focused view</strong><span>{focusedRows.length} of {state.rows.length} rows · {state.filters.length} active filter{state.filters.length === 1 ? '' : 's'}</span><button type="button" onClick={() => updateWorkbench({ filters: [] })}>Clear</button></div>}
+              {state.dashboardNotes && <p id="dashboard-context" className="dashboard-context">{state.dashboardNotes}</p>}
               {health && (
                 <div id="dash-health" className="dash-health">
                   <span>{health.rowsParsed} row{health.rowsParsed === 1 ? '' : 's'} parsed · {health.rowsDropped} dropped</span>
@@ -1520,11 +1691,16 @@ function App() {
                 </div>
               )}
               <div className="dash-share-actions">
+                <button id="open-workbench" type="button" className="btn btn-primary" onClick={() => dispatch({ type: 'patch', value: { workbenchOpen: true } })}>Analysis workbench</button>
                 <button id="open-brief" type="button" className="btn btn-ghost" onClick={() => dispatch({ type: 'patch', value: { briefOpen: true } })}>Executive brief</button>
                 <button id="open-recipe-inspector" type="button" className="btn btn-ghost" onClick={() => dispatch({ type: 'patch', value: { recipeInspectorOpen: true } })}>Inspect recipe</button>
                 <button id="open-alerts" type="button" className={`btn btn-ghost ${triggeredAlerts ? 'has-alert' : ''}`} disabled={!hasHttpSource(state.dataSource)} title={hasHttpSource(state.dataSource) ? 'Configure thresholds evaluated after while-open refreshes' : 'Threshold alerts require a refreshable HTTP source'} onClick={() => dispatch({ type: 'patch', value: { alertsOpen: true } })}>Alerts · {triggeredAlerts || state.alerts.length}</button>
                 <button id="share-recipe-link" type="button" className="btn btn-ghost" onClick={() => void copyRecipeLink()}>Copy recipe link</button>
                 <button id="export-html-btn" type="button" className="btn btn-ghost" title="The exported file supports ?embed or #embed mode" onClick={exportStandalone}>Interactive HTML ↓</button>
+                <button id="presentation-mode" type="button" className="btn btn-ghost" onClick={event => {
+                  presentationReturnFocus.current = event.currentTarget;
+                  dispatch({ type: 'patch', value: { presentationMode: true } });
+                }}>Present</button>
                 <label className="theme-picker"><span>Theme</span><select id="theme-picker" value={state.theme} onChange={event => setDashboardTheme(event.target.value as DashboardTheme)}><option value="mise">Mise</option><option value="ink">Ink</option><option value="ocean">Ocean</option><option value="plum">Plum</option><option value="marketing">Marketing site</option></select></label>
               </div>
               <div className="recipe-history">
@@ -1536,13 +1712,14 @@ function App() {
                 </details>
               </div>
             </div>
-            <RecurringReportSummary state={state} comparison={comparison} now={clock} onCadence={setRefreshCadence} />
-            <WidgetGrid
+            <RecurringReportSummary state={state} comparison={state.filters.length ? null : comparison} now={clock} onCadence={setRefreshCadence} />
+            {focusedRows.length ? <WidgetGrid
               recipe={state.recipe}
-              rows={state.rows}
+              rows={focusedRows}
               schema={state.schema}
               changedWidgets={state.changedWidgets}
-              comparisons={comparison?.kpis || []}
+              comparisons={state.filters.length ? [] : comparison?.kpis || []}
+              goals={kpiGoalEvaluations}
               excludeOutliers={state.excludeOutliers}
               onAssumptions={index => dispatch({ type: 'patch', value: { assumptionsWidgetIndex: index } })}
               onInspect={openInspector}
@@ -1551,7 +1728,7 @@ function App() {
               onCopyTable={widget => void copyTable(widget)}
               onEditWidget={editWidget}
               onChefWidget={openChefForWidget}
-            />
+            /> : <div id="focus-empty" className="focus-empty" role="status"><strong>No rows match this focused view.</strong><span>Clear or adjust a filter in the Analysis workbench to bring the dashboard back.</span><button type="button" className="btn btn-primary" onClick={() => updateWorkbench({ filters: [] })}>Clear filters</button></div>}
           </>
         )}
       </section>
@@ -1606,6 +1783,33 @@ function App() {
         onClose={() => dispatch({ type: 'patch', value: { alertsOpen: false } })}
         onAdd={alert => updateAlerts([...stateRef.current.alerts, alert])}
         onRemove={id => updateAlerts(stateRef.current.alerts.filter(alert => alert.id !== id))}
+      />
+      <AnalysisWorkbench
+        open={state.workbenchOpen}
+        rows={focusedRows}
+        allRows={state.rows}
+        schema={state.schema}
+        recipe={state.recipe}
+        filters={state.filters}
+        savedViews={state.savedViews}
+        kpiGoals={state.kpiGoals}
+        dashboardNotes={state.dashboardNotes}
+        excludeOutliers={state.excludeOutliers}
+        onClose={() => dispatch({ type: 'patch', value: { workbenchOpen: false } })}
+        onFilters={filters => updateWorkbench({ filters })}
+        onSavedViews={savedViews => updateWorkbench({ savedViews })}
+        onKpiGoals={kpiGoals => updateWorkbench({ kpiGoals })}
+        onDashboardNotes={dashboardNotes => {
+          updateWorkbench({ dashboardNotes });
+          flashStatus('Dashboard context saved');
+        }}
+        onPrompt={prompt => {
+          setChefInput(prompt);
+          dispatch({ type: 'patch', value: { workbenchOpen: false, chefOpen: true, chefWidgetIndex: null } });
+          window.setTimeout(() => document.getElementById('chef-input')?.focus(), 0);
+        }}
+        onExport={exportDashboardBundle}
+        onImport={importDashboardBundle}
       />
     </>
   );

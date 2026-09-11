@@ -16,7 +16,7 @@ import {
   type ThresholdAlert,
 } from './domain';
 
-function useDialog(open: boolean) {
+export function useDialog(open: boolean) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     if (open && ref.current && !ref.current.open) ref.current.showModal();
@@ -25,7 +25,7 @@ function useDialog(open: boolean) {
   return ref;
 }
 
-function CloseButton({ onClose }: { onClose: () => void }) {
+export function CloseButton({ onClose }: { onClose: () => void }) {
   return <button className="dialog-close" type="button" aria-label="Close" onClick={onClose}>×</button>;
 }
 

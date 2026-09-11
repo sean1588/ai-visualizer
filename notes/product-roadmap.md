@@ -110,6 +110,19 @@ emits content-hashed assets, and the PNG renderer is bundled as a lazy chunk.
 - Embed mode for self-contained exports.
 - Brand palettes and export themes.
 
+### Analysis workbench
+
+- Dashboard-wide focus filters update every widget without changing the recipe.
+- Saved views preserve reusable filter combinations with each plate.
+- KPI goals show target progress and update against the current focused view.
+- Dashboard context notes keep decisions and caveats beside the analysis.
+- Column profiles expose ranges, medians, distributions, and date coverage.
+- A local relationship finder surfaces strong numeric correlations as leads.
+- A privacy scan flags likely personal data and credential fields locally.
+- Schema-aware follow-up questions can be handed to The Chef for refinement.
+- Presentation mode removes editing chrome for reviews and screen sharing.
+- Portable dashboard backups restore rows, recipes, views, goals, notes, and theme.
+
 ## Architecture boundaries
 
 ### Paid and collaborative capabilities
