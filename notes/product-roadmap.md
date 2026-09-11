@@ -85,8 +85,6 @@ emits content-hashed assets, and the PNG renderer is bundled as a lazy chunk.
   to clean datasets.
 - Preserve an audit trail of ignored rows and user overrides.
 
-## Next
-
 ### First-run discovery
 
 - Replace raw-data sample chips with a small gallery of completed plates.

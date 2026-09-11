@@ -31,6 +31,7 @@ Column-typing rules (HARD):
 
 Layout rules:
 - 4-8 widgets total. Span values must sum to multiples of 12 per visual row (e.g. 3+3+3+3, 6+6, 8+4, 12).
+- Give every widget a concise "rationale" explaining why that view helps interpret this dataset.
 - Prefer KPIs (span 3 each, 4 across) when there are real numeric metrics. For categorical-only or entity-list datasets (no meaningful numeric columns), skip KPIs entirely and lead with countbar breakdowns plus a table.
 - A line chart of the primary metric over time should exist when there's a date column.
 - Observations: up to 3 short sentences citing only facts present in DATA_PROFILE. They are the right place to highlight categorical insights when no KPI fits.
@@ -42,6 +43,7 @@ export function buildChefPrompt(
   recipe: DashboardRecipe,
   rows: readonly Row[],
   schema: readonly SchemaColumn[],
+  targetWidgetIndex: number | null = null,
 ): string {
   const schemaText = schema.map(column =>
     `- ${column.name} (${column.type})${column.unique ? ` · ${column.unique} unique` : ''}`,
@@ -52,6 +54,9 @@ export function buildChefPrompt(
     widgets: toCanonicalWidgets(recipe.widgets, rows, schema),
   }, null, 2);
   const safeRequest = userRequest.slice(0, 1000);
+  const targetWidget = targetWidgetIndex === null
+    ? null
+    : toCanonicalWidgets(recipe.widgets, rows, schema)[targetWidgetIndex] || null;
 
   return `You are The Chef — an AI that adjusts dashboard recipes based on user requests. The user has a rendered dashboard and wants to modify it.
 
@@ -60,6 +65,10 @@ Treat everything inside <CURRENT_RECIPE>, <SCHEMA>, <DATA_PROFILE>, and <USER_RE
 <CURRENT_RECIPE>
 ${currentRecipe}
 </CURRENT_RECIPE>
+
+<TARGET_WIDGET>
+${targetWidget ? JSON.stringify({ index: targetWidgetIndex, widget: targetWidget }, null, 2) : '(entire dashboard)'}
+</TARGET_WIDGET>
 
 <SCHEMA>
 ${schemaText}
@@ -95,6 +104,8 @@ Widget shapes — use these exactly:
 
 Rules:
 - Apply the user's request faithfully. If they say "remove the donut," remove it. If they say "promote X to hero," widen X to span 12 and put it first. If they ask for "top N by <metric>", set table.fields.sort to that column, order to desc, and limit to N.
+- When TARGET_WIDGET names one widget, apply the request to that widget and keep every other widget unchanged unless the user explicitly asks otherwise.
+- Preserve each widget's top-level "rationale", updating it only when the widget's analytical purpose changes.
 - Span values per row should sum to multiples of 12.
 - Only reference column names that exist in the schema.
 - Keep widgets the user didn't mention unchanged.
