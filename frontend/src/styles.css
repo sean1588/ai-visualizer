@@ -18,6 +18,7 @@
   body[data-theme="ink"] { --bg: #f2f2ef; --bg-elev: #ffffff; --bg-soft: #e4e4df; --fg: #171717; --fg-mute: #62625e; --rule: #171717; --rule-soft: #cfcfca; --accent: #111111; --accent-2: #555550; --accent-3: #85857d; --accent-4: #343434; }
   body[data-theme="ocean"] { --bg: #eef4f3; --bg-elev: #f8fbfa; --bg-soft: #dce9e7; --fg: #17302f; --fg-mute: #56706d; --rule: #17302f; --rule-soft: #bfd1ce; --accent: #176b73; --accent-2: #32745c; --accent-3: #b17c3d; --accent-4: #315b7a; }
   body[data-theme="plum"] { --bg: #f5f0f4; --bg-elev: #fcf8fb; --bg-soft: #eadfe8; --fg: #352333; --fg-mute: #756371; --rule: #352333; --rule-soft: #d8c7d4; --accent: #813c72; --accent-2: #536b51; --accent-3: #a7793f; --accent-4: #554b82; }
+  body[data-theme="marketing"] { --bg: #fafaf7; --bg-elev: #ffffff; --bg-soft: #f0eeea; --fg: #14110a; --fg-mute: #6b5d3a; --rule: #14110a; --rule-soft: #c9b687; --accent: #c63e19; --accent-2: #1e6b4f; --accent-3: #2d4a8a; --accent-4: #e0a020; --accent-fg: #fffaeb; --font-body: "Outfit", ui-sans-serif, system-ui, sans-serif; --font-display: "Fraunces", Georgia, serif; --font-mono: "JetBrains Mono", ui-monospace, monospace; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; min-height: 100vh; }

@@ -1011,7 +1011,7 @@ function App() {
     try {
       const renderer = window.html2canvas || (await import('html2canvas')).default;
       const canvas = await renderer(dashboard, {
-        backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#f5f2ec',
+        backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg').trim() || '#f5f2ec',
         scale: Math.min(2, window.devicePixelRatio || 1),
         useCORS: true,
         logging: false,
@@ -1525,7 +1525,7 @@ function App() {
                 <button id="open-alerts" type="button" className={`btn btn-ghost ${triggeredAlerts ? 'has-alert' : ''}`} disabled={!hasHttpSource(state.dataSource)} title={hasHttpSource(state.dataSource) ? 'Configure thresholds evaluated after while-open refreshes' : 'Threshold alerts require a refreshable HTTP source'} onClick={() => dispatch({ type: 'patch', value: { alertsOpen: true } })}>Alerts · {triggeredAlerts || state.alerts.length}</button>
                 <button id="share-recipe-link" type="button" className="btn btn-ghost" onClick={() => void copyRecipeLink()}>Copy recipe link</button>
                 <button id="export-html-btn" type="button" className="btn btn-ghost" title="The exported file supports ?embed or #embed mode" onClick={exportStandalone}>Interactive HTML ↓</button>
-                <label className="theme-picker"><span>Theme</span><select id="theme-picker" value={state.theme} onChange={event => setDashboardTheme(event.target.value as DashboardTheme)}><option value="mise">Mise</option><option value="ink">Ink</option><option value="ocean">Ocean</option><option value="plum">Plum</option></select></label>
+                <label className="theme-picker"><span>Theme</span><select id="theme-picker" value={state.theme} onChange={event => setDashboardTheme(event.target.value as DashboardTheme)}><option value="mise">Mise</option><option value="ink">Ink</option><option value="ocean">Ocean</option><option value="plum">Plum</option><option value="marketing">Marketing site</option></select></label>
               </div>
               <div className="recipe-history">
                 <button id="recipe-undo" type="button" className="btn btn-ghost" disabled={state.recipeHistoryIndex <= 0} onClick={() => navigateRecipeHistory(-1)}>↶ Undo</button>

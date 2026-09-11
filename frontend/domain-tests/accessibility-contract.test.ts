@@ -6,6 +6,7 @@ const themes = {
   ink: { background: '#f2f2ef', foreground: '#171717', muted: '#62625e', accent: '#111111' },
   ocean: { background: '#eef4f3', foreground: '#17302f', muted: '#56706d', accent: '#176b73' },
   plum: { background: '#f5f0f4', foreground: '#352333', muted: '#756371', accent: '#813c72' },
+  marketing: { background: '#fafaf7', foreground: '#14110a', muted: '#6b5d3a', accent: '#c63e19' },
 };
 
 function luminance(hex: string): number {
