@@ -75,6 +75,26 @@ new aws.iam.RolePolicyAttachment("cook-role-basic", {
   policyArn: aws.iam.ManagedPolicy.AWSLambdaBasicExecutionRole,
 });
 
+const rateLimitTable = new aws.dynamodb.Table("rate-limit", {
+  attributes: [{ name: "bucketKey", type: "S" }],
+  hashKey: "bucketKey",
+  billingMode: "PAY_PER_REQUEST",
+  ttl: { attributeName: "expiresAt", enabled: true },
+  tags,
+});
+
+new aws.iam.RolePolicy("cook-rate-limit", {
+  role: lambdaRole.id,
+  policy: rateLimitTable.arn.apply(arn => JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [{
+      Effect: "Allow",
+      Action: ["dynamodb:UpdateItem"],
+      Resource: arn,
+    }],
+  })),
+});
+
 const cookFn = new aws.lambda.Function("cook", {
   runtime: aws.lambda.Runtime.NodeJS22dX,
   role: lambdaRole.arn,
@@ -93,6 +113,7 @@ const cookFn = new aws.lambda.Function("cook", {
       OPENROUTER_API_KEY: openrouterApiKey,
       OPENROUTER_REFERER: `https://${domain}`,
       OPENROUTER_TITLE: "Mise",
+      RATE_LIMIT_TABLE: rateLimitTable.name,
     },
   },
   tags,
@@ -170,11 +191,33 @@ const ORIGIN_REQUEST_VIEWER_EXCEPT_HOST = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
 const staticBrowserRevalidation = new aws.cloudfront.ResponseHeadersPolicy("static-browser-revalidation", {
   comment: "Require browsers to revalidate Mise static assets on normal refreshes.",
   customHeadersConfig: {
-    items: [{
-      header: "Cache-Control",
-      value: "no-cache, max-age=0, must-revalidate",
+    items: [
+      {
+        header: "Cache-Control",
+        value: "no-cache, max-age=0, must-revalidate",
+        override: true,
+      },
+      {
+        header: "Permissions-Policy",
+        value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        override: true,
+      },
+    ],
+  },
+  securityHeadersConfig: {
+    contentSecurityPolicy: {
+      contentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'",
       override: true,
-    }],
+    },
+    contentTypeOptions: { override: true },
+    frameOptions: { frameOption: "SAMEORIGIN", override: true },
+    referrerPolicy: { referrerPolicy: "strict-origin-when-cross-origin", override: true },
+    strictTransportSecurity: {
+      accessControlMaxAgeSec: 31536000,
+      includeSubdomains: true,
+      preload: true,
+      override: true,
+    },
   },
 });
 

@@ -8,9 +8,10 @@
     "build": "esbuild cook.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/cook.js --minify",
     "typecheck": "tsc --noEmit && npm test",
     "pretest": "npm --prefix ../frontend run build:public",
-    "test": "playwright install chromium && node --test tests/*.test.mjs"
+    "test": "playwright install chromium && node --experimental-strip-types --test tests/*.test.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1130.0",
     "@sean.holung/minicode-sdk": "^0.0.1"
   },
   "devDependencies": {

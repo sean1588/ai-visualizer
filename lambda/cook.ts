@@ -11,12 +11,18 @@ import {
   OutputValidationError,
   type OutputSchema,
 } from "@sean.holung/minicode-sdk";
+import { DynamoDBClient, UpdateItemCommand } from "@aws-sdk/client-dynamodb";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 
 type CookRequest = {
   prompt?: unknown;
   kind?: unknown;
   temperature?: unknown;
   url?: unknown;
+  version?: unknown;
+  event?: unknown;
+  properties?: unknown;
 };
 
 type LambdaEvent = {
@@ -68,6 +74,80 @@ function isBlockedHost(hostname: string): boolean {
   return false;
 }
 
+type AddressResolver = (
+  hostname: string,
+  options: { all: true; verbatim: true },
+) => Promise<Array<{ address: string; family: number }>>;
+
+export function isBlockedAddress(input: string): boolean {
+  const address = input.replace(/^\[|\]$/g, "").toLowerCase();
+  if (address.includes(".")) {
+    const mapped = address.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
+    const value = mapped || address;
+    if (isIP(value) !== 4) return true;
+    const [a, b] = value.split(".").map(Number);
+    return a === 0
+      || a === 10
+      || a === 127
+      || (a === 100 && b >= 64 && b <= 127)
+      || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && (b === 0 || b === 168))
+      || (a === 198 && (b === 18 || b === 19 || b === 51))
+      || (a === 203 && b === 0)
+      || a >= 224;
+  }
+  if (isIP(address) !== 6) return true;
+  return address === "::"
+    || address === "::1"
+    || address.startsWith("fc")
+    || address.startsWith("fd")
+    || /^fe[89ab]/.test(address)
+    || address.startsWith("ff")
+    || address.startsWith("2001:db8");
+}
+
+export async function assertPublicUrl(
+  url: URL,
+  resolver: AddressResolver = lookup,
+): Promise<void> {
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || isBlockedHost(url.hostname)) {
+    throw new Error("unsupported_url");
+  }
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  if (isIP(hostname)) {
+    if (isBlockedAddress(hostname)) throw new Error("unsupported_url");
+    return;
+  }
+  const addresses = await resolver(hostname, { all: true, verbatim: true });
+  if (!addresses.length || addresses.some(result => isBlockedAddress(result.address))) {
+    throw new Error("unsupported_url");
+  }
+}
+
+export async function fetchPublicUrl(
+  initialUrl: URL,
+  signal: AbortSignal,
+  resolver: AddressResolver = lookup,
+  fetcher: typeof fetch = fetch,
+): Promise<Response> {
+  let url = initialUrl;
+  for (let redirects = 0; redirects <= 5; redirects++) {
+    await assertPublicUrl(url, resolver);
+    const response = await fetcher(url, {
+      method: "GET",
+      headers: { accept: "application/json,text/csv,text/plain;q=0.9,*/*;q=0.1" },
+      redirect: "manual",
+      signal,
+    });
+    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    const location = response.headers.get("location");
+    if (!location) throw new Error("redirect_without_location");
+    url = new URL(location, url);
+  }
+  throw new Error("too_many_redirects");
+}
+
 async function readLimitedResponse(res: Response): Promise<string> {
   const reader = res.body?.getReader();
   if (!reader) return await res.text();
@@ -105,12 +185,7 @@ async function handleFetchData(payload: CookRequest, t0: number): Promise<Lambda
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
     logEvent({ event: "fetch_start", host: url.hostname });
-    const res = await fetch(url, {
-      method: "GET",
-      headers: { accept: "application/json,text/csv,text/plain;q=0.9,*/*;q=0.1" },
-      redirect: "follow",
-      signal: controller.signal,
-    });
+    const res = await fetchPublicUrl(url, controller.signal);
     const contentType = res.headers.get("content-type") || "";
     const text = await readLimitedResponse(res);
     if (!res.ok) {
@@ -121,9 +196,12 @@ async function handleFetchData(payload: CookRequest, t0: number): Promise<Lambda
     return json(200, { text, contentType, finalUrl: res.url });
   } catch (e) {
     const err = e instanceof Error ? e.message : "unknown";
-    const reason = err === "response_too_large" ? "response_too_large" : "fetch_failed";
-    logEvent({ event: "fetch_error", reason, err, status: reason === "response_too_large" ? 413 : 502, ms: Date.now() - t0 });
-    return json(reason === "response_too_large" ? 413 : 502, { error: reason });
+    const reason = err === "response_too_large"
+      ? "response_too_large"
+      : err === "unsupported_url" ? "unsupported_url" : "fetch_failed";
+    const status = reason === "response_too_large" ? 413 : reason === "unsupported_url" ? 400 : 502;
+    logEvent({ event: "fetch_error", reason, err, status, ms: Date.now() - t0 });
+    return json(status, { error: reason });
   } finally {
     clearTimeout(timeout);
   }
@@ -136,18 +214,50 @@ const rateBuckets = new Map<string, { count: number; resetAt: number }>();
 const RATE_WINDOW_MS = 60 * 60 * 1000; // 1h
 const RATE_LIMIT_PER_WINDOW = 30;
 
-function rateLimit(ip: string): { allowed: boolean; retryAfter: number } {
+function rateLimit(ip: string, maximum = RATE_LIMIT_PER_WINDOW): { allowed: boolean; retryAfter: number } {
   const now = Date.now();
   const b = rateBuckets.get(ip);
   if (!b || b.resetAt < now) {
     rateBuckets.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
     return { allowed: true, retryAfter: 0 };
   }
-  if (b.count >= RATE_LIMIT_PER_WINDOW) {
+  if (b.count >= maximum) {
     return { allowed: false, retryAfter: Math.ceil((b.resetAt - now) / 1000) };
   }
   b.count++;
   return { allowed: true, retryAfter: 0 };
+}
+
+let rateLimitClient: DynamoDBClient | undefined;
+
+async function sharedRateLimit(ip: string, maximum = RATE_LIMIT_PER_WINDOW): Promise<{ allowed: boolean; retryAfter: number }> {
+  const tableName = process.env.RATE_LIMIT_TABLE;
+  if (!tableName) return rateLimit(ip, maximum);
+  const now = Date.now();
+  const windowStart = Math.floor(now / RATE_WINDOW_MS) * RATE_WINDOW_MS;
+  const resetAt = windowStart + RATE_WINDOW_MS;
+  rateLimitClient ||= new DynamoDBClient({});
+  try {
+    await rateLimitClient.send(new UpdateItemCommand({
+      TableName: tableName,
+      Key: { bucketKey: { S: `${ip}:${windowStart}` } },
+      UpdateExpression: "SET #count = if_not_exists(#count, :zero) + :one, expiresAt = :expires",
+      ConditionExpression: "attribute_not_exists(#count) OR #count < :limit",
+      ExpressionAttributeNames: { "#count": "requestCount" },
+      ExpressionAttributeValues: {
+        ":zero": { N: "0" },
+        ":one": { N: "1" },
+        ":limit": { N: String(maximum) },
+        ":expires": { N: String(Math.ceil(resetAt / 1000) + 3600) },
+      },
+    }));
+    return { allowed: true, retryAfter: 0 };
+  } catch (error) {
+    if (error && typeof error === "object" && (error as { name?: string }).name === "ConditionalCheckFailedException") {
+      return { allowed: false, retryAfter: Math.max(1, Math.ceil((resetAt - now) / 1000)) };
+    }
+    throw error;
+  }
 }
 
 // Strict JSON Schema (draft 2020-12) for the recipe. Per-widget oneOf
@@ -376,6 +486,58 @@ const CHEF_RECIPE_SCHEMA: OutputSchema = {
 
 const SYSTEM_PROMPT_CHEF = "You are The Chef, an editorial dashboard editor. Read the user message and deliver the edited recipe via the deliver_chef_recipe tool. Call deliver_chef_recipe exactly once with a complete recipe; do not write prose.";
 
+const PRODUCT_EVENTS = new Set([
+  "ingest_started",
+  "dashboard_rendered",
+  "assumption_edited",
+  "chart_inspected",
+  "chef_edit",
+  "recurring_refresh",
+  "export_created",
+  "health_action",
+  "direct_edit",
+]);
+const PRODUCT_PROPERTY_KEYS = new Set([
+  "source",
+  "fallback",
+  "widgets",
+  "widgetType",
+  "scope",
+  "success",
+  "result",
+  "triggered",
+  "type",
+  "action",
+]);
+const PRODUCT_PROPERTY_VALUES = new Set([
+  "file", "paste", "http", "example", "recipe",
+  "kpi", "line", "bar", "donut", "statlist", "countbar", "table", "observations",
+  "dashboard", "widget", "success", "error",
+  "png", "html", "csv", "markdown", "brief", "link",
+  "move-up", "move-down", "resize", "duplicate", "remove",
+  "treat-as-date", "include-outliers", "acknowledge",
+]);
+
+function handleProductEvent(payload: CookRequest, t0: number): LambdaResponse {
+  const event = typeof payload.event === "string" ? payload.event : "";
+  const properties = payload.properties && typeof payload.properties === "object" && !Array.isArray(payload.properties)
+    ? payload.properties as Record<string, unknown>
+    : {};
+  const validProperties = Object.entries(properties).every(([key, value]) =>
+    PRODUCT_PROPERTY_KEYS.has(key)
+    && (
+      typeof value === "boolean"
+      || (typeof value === "number" && Number.isFinite(value))
+      || (typeof value === "string" && PRODUCT_PROPERTY_VALUES.has(value))
+    ),
+  );
+  if (payload.version !== 1 || !PRODUCT_EVENTS.has(event) || !validProperties) {
+    return json(400, { error: "invalid_event" });
+  }
+  logEvent({ event: "product_event", productEvent: event, properties, status: 204, ms: Date.now() - t0 });
+  return { statusCode: 204, headers: { "cache-control": "no-store" }, body: "" };
+}
+
 // Module-scope client; reused across warm invocations.
 let modelClient: OpenAICompatibleModelClient | undefined;
 function getClient(baseUrl: string, apiKey: string, timeoutSeconds: number): OpenAICompatibleModelClient {
@@ -405,7 +567,14 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
 
   const xff = event.headers?.["x-forwarded-for"] || event.headers?.["X-Forwarded-For"] || "";
   const ip = xff.split(",")[0]?.trim() || event.requestContext?.http?.sourceIp || "unknown";
-  const limit = rateLimit(ip);
+  let limit: { allowed: boolean; retryAfter: number };
+  try {
+    const rateLimitKey = `${ip}:${path.endsWith("/api/events") ? "events" : "api"}`;
+    limit = await sharedRateLimit(rateLimitKey, path.endsWith("/api/events") ? 120 : RATE_LIMIT_PER_WINDOW);
+  } catch (error) {
+    logEvent({ event: "error", reason: "rate_limit_unavailable", status: 503, ms: Date.now() - t0, err: error instanceof Error ? error.message : "unknown" });
+    return json(503, { error: "temporarily_unavailable" });
+  }
   if (!limit.allowed) {
     logEvent({ event: "rejected", reason: "rate_limited", retryAfter: limit.retryAfter, status: 429, ms: Date.now() - t0 });
     return json(429, { error: "rate_limited", retryAfter: limit.retryAfter }, {
@@ -427,14 +596,17 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
   if (path.endsWith("/api/fetch-data")) {
     return handleFetchData(payload, t0);
   }
+  if (path.endsWith("/api/events")) {
+    return handleProductEvent(payload, t0);
+  }
 
   const kind = typeof payload.kind === "string" ? payload.kind : "unknown";
   logEvent({ event: "request_received", method, ip, kind });
 
   const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
-  if (!prompt || prompt.length > MAX_PROMPT_CHARS) {
+  if (!["plan", "chef"].includes(kind) || !prompt || prompt.length > MAX_PROMPT_CHARS) {
     logEvent({ event: "rejected", reason: "invalid_prompt", kind, promptLen: prompt.length, status: 400, ms: Date.now() - t0 });
-    return json(400, { error: "invalid_prompt" });
+    return json(400, { error: !["plan", "chef"].includes(kind) ? "invalid_kind" : "invalid_prompt" });
   }
 
   const baseURL = process.env.LLM_BASE_URL || "https://openrouter.ai/api/v1";
