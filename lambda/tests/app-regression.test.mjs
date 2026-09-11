@@ -483,6 +483,89 @@ test("chart points and legends open the contributing-row inspector", async () =>
   });
 });
 
+test("data health explains irregular rows and records explicit schema overrides", async () => {
+  await withPage(async page => {
+    let cookCalls = 0;
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, {
+      title: "Health Review",
+      widgets: [
+        { type: "kpi", span: 3, title: "Revenue", fields: { metric: "revenue", aggregate: "sum" } },
+        { type: "table", span: 12, title: "Rows", fields: { limit: 10 } },
+      ],
+    }, () => { cookCalls++; });
+    const csv = [
+      "date,segment,revenue",
+      "2026-01-01,A,10",
+      "2026-01-01,B,20",
+      "unknown,C,",
+      "2026-02-01,D,1000,unexpected",
+    ].join("\n");
+
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#paste").fill(csv);
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+    await page.locator("#data-health-btn").click();
+
+    let text = await page.locator("#data-health-dialog").innerText();
+    assert.match(text, /Irregular CSV rows kept/i);
+    assert.match(text, /Missing values/i);
+    assert.match(text, /Mixed date values in date/i);
+    assert.match(text, /extra fields were preserved/i);
+    await page.getByRole("button", { name: /Treat date as a date/i }).click();
+    await page.waitForFunction(() => document.getElementById("data-health-dialog")?.innerText.includes("Repeated date values"));
+
+    text = await page.locator("#data-health-dialog").innerText();
+    assert.match(text, /Repeated date values/i);
+    assert.match(text, /schema override/i);
+    assert.match(text, /Treat date as a date column/i);
+    assert.equal(cookCalls, 1);
+
+    const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("mise.recents.v1"))[0]);
+    assert.equal(stored.schemaOverrides.date, "date");
+    assert.equal(stored.dataAudit.at(-1).action, "schema-override");
+  });
+});
+
+test("recipe links reapply without AI and standalone HTML keeps chart inspection local", async () => {
+  await withPage(async page => {
+    let cookCalls = 0;
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE_URL });
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, AGGREGATE_PLAN, () => { cookCalls++; });
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#paste").fill(JSON.stringify(SEGMENT_REVENUE));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    await page.locator("#share-recipe-link").click();
+    const link = await page.evaluate(() => navigator.clipboard.readText());
+    assert.match(link, /#recipe=/);
+    assert.doesNotMatch(link, /example\.test|SEGMENT_REVENUE/);
+
+    await page.goto(link, { waitUntil: "networkidle" });
+    assert.match(await page.locator("body").innerText(), /Shared recipe ready: Segment Revenue/i);
+    await page.locator("#paste").fill(JSON.stringify(SEGMENT_REVENUE));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+    assert.equal(cookCalls, 1);
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.locator("#export-html-btn").click();
+    const download = await downloadPromise;
+    assert.match(download.suggestedFilename(), /\.html$/);
+    const path = await download.path();
+    assert.ok(path);
+    const html = readFileSync(path, "utf8");
+    assert.match(html, /Interactive snapshot exported from Mise/);
+    assert.match(html, /standalone-inspector/);
+
+    await page.setContent(html, { waitUntil: "load" });
+    await page.locator(".chart-hit").first().click();
+    assert.equal(await page.locator("#standalone-inspector").getAttribute("hidden"), null);
+    assert.match(await page.locator("#standalone-meta").innerText(), /matching row/i);
+  });
+});
+
 test("chartable table-only model output falls back to a useful dashboard", async () => {
   await withPage(async page => {
     await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, TABLE_ONLY_PLAN);

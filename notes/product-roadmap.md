@@ -70,14 +70,12 @@ emits content-hashed assets, and the PNG renderer is bundled as a lazy chunk.
 - Add manual and while-open refresh cadences for HTTP sources.
 - Show fetched-at time and stale/error state.
 
-## Next
-
 ### No-custody sharing
 
 - Export a self-contained interactive HTML dashboard.
 - Share recipe-only links encoded in the URL fragment.
 - Keep PNG, recipe JSON, table CSV, and Markdown exports.
-- Consider hosted links only after defining retention, abuse, and deletion.
+- Keep hosted links deferred until retention, abuse, and deletion are defined.
 
 ### Data health
 
@@ -86,6 +84,8 @@ emits content-hashed assets, and the PNG renderer is bundled as a lazy chunk.
 - Offer corrections only when ambiguity exists; do not add a confirmation gate
   to clean datasets.
 - Preserve an audit trail of ignored rows and user overrides.
+
+## Next
 
 ### First-run discovery
 

@@ -1,11 +1,13 @@
 import type {
   DashboardRecipe,
+  DataAuditEntry,
   DataSource,
   DatasetSnapshot,
   ParseHealth,
   RenderedWidget,
   Row,
   SchemaColumn,
+  SchemaOverrides,
 } from './domain';
 import type { RecentDashboard } from './storage';
 
@@ -38,6 +40,8 @@ export interface AppState {
   sourceText: string;
   notes: string;
   parseHealth: ParseHealth | null;
+  schemaOverrides: SchemaOverrides;
+  dataAudit: DataAuditEntry[];
   previousSnapshot: DatasetSnapshot | null;
   updatedAt: number | null;
   pendingRecipe: DashboardRecipe<unknown> | null;
@@ -55,6 +59,7 @@ export interface AppState {
   changedWidgets: Set<string>;
   assumptionsWidgetIndex: number | null;
   inspector: InspectorState | null;
+  healthOpen: boolean;
 }
 
 export const initialSteps: Record<LoadingStep, StepStatus> = {
@@ -76,6 +81,8 @@ export function createInitialState(recents: RecentDashboard[] = []): AppState {
     sourceText: '',
     notes: '',
     parseHealth: null,
+    schemaOverrides: {},
+    dataAudit: [],
     previousSnapshot: null,
     updatedAt: null,
     pendingRecipe: null,
@@ -93,6 +100,7 @@ export function createInitialState(recents: RecentDashboard[] = []): AppState {
     changedWidgets: new Set(),
     assumptionsWidgetIndex: null,
     inspector: null,
+    healthOpen: false,
   };
 }
 

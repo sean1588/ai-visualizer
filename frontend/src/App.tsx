@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import {
+  applySchemaOverrides,
   applyRecipeToRows,
   buildDataProfile,
   buildParseHealth,
@@ -35,6 +36,8 @@ import {
   validateRecipe,
   widgetFingerprint,
   type DashboardRecipe,
+  type DataAuditEntry,
+  type DataHealthIssue,
   type DataSource,
   type DatasetComparison,
   type DatasetSnapshot,
@@ -44,9 +47,11 @@ import {
   type SchemaColumn,
   type TableWidget,
 } from './domain';
+import DataHealthDialog from './DataHealth';
 import { buildChefPrompt, buildPrompt } from './prompts';
 import { SAMPLES, SAMPLE_TITLES } from './samples';
 import { complete, fetchRemoteData } from './services';
+import { buildRecipeLink, buildStandaloneHtml, decodeRecipeFragment } from './sharing';
 import { appReducer, createInitialState, initialSteps, type AppState, type ChefMessage, type LoadingStep } from './state';
 import { clearRecents, loadRecents, migrateLegacyStorage, relativeTime, saveRecent, type RecentDashboard } from './storage';
 import WidgetGrid from './WidgetGrid';
@@ -63,6 +68,10 @@ const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve
 
 function cloneRecipe(recipe: DashboardRecipe): DashboardRecipe {
   return structuredClone(recipe);
+}
+
+function stampAudit(entries: readonly DataAuditEntry[] = [], at: number = Date.now()): DataAuditEntry[] {
+  return entries.map(entry => ({ ...entry, at: entry.at || at }));
 }
 
 function hasHttpSource(source: DataSource | null): boolean {
@@ -93,6 +102,16 @@ function downloadFile(name: string, blob: Blob): string {
   }
   window.setTimeout(() => URL.revokeObjectURL(url), 2000);
   return name;
+}
+
+function pageCssText(): string {
+  return Array.from(document.styleSheets).map(sheet => {
+    try {
+      return Array.from(sheet.cssRules).map(rule => rule.cssText).join('\n');
+    } catch {
+      return '';
+    }
+  }).join('\n');
 }
 
 function parseModelObject(raw: string): Record<string, unknown> {
@@ -439,6 +458,35 @@ function App() {
   }, [state]);
 
   useEffect(() => {
+    const loadLinkedRecipe = () => {
+      const linkedRecipe = decodeRecipeFragment(window.location.hash);
+      if (!linkedRecipe) return;
+      setPasteText('');
+      setChefInput('');
+      dispatch({
+        type: 'patch',
+        value: {
+          stage: 'empty',
+          rows: [],
+          schema: [],
+          recipe: null,
+          id: null,
+          dataSource: null,
+          parseHealth: null,
+          previousSnapshot: null,
+          pendingRecipe: linkedRecipe,
+          error: `Shared recipe ready: ${linkedRecipe.title || 'untitled'}. Add CSV or JSON data to render it without another AI call.`,
+          chefOpen: false,
+          chefHistory: [],
+        },
+      });
+    };
+    loadLinkedRecipe();
+    window.addEventListener('hashchange', loadLinkedRecipe);
+    return () => window.removeEventListener('hashchange', loadLinkedRecipe);
+  }, []);
+
+  useEffect(() => {
     if (state.stage !== 'dash') return;
     const timer = window.setInterval(() => setClock(Date.now()), 30_000);
     return () => window.clearInterval(timer);
@@ -459,6 +507,8 @@ function App() {
     recipe: DashboardRecipe;
     dataSource: DataSource | null;
     parseHealth: AppState['parseHealth'];
+    schemaOverrides?: AppState['schemaOverrides'];
+    dataAudit?: DataAuditEntry[];
     previousSnapshot: DatasetSnapshot | null;
     updatedAt: number;
     id?: string | null;
@@ -472,6 +522,8 @@ function App() {
       recipe: snapshot.recipe,
       dataSource: snapshot.dataSource,
       parseHealth: snapshot.parseHealth,
+      schemaOverrides: snapshot.schemaOverrides ?? stateRef.current.schemaOverrides,
+      dataAudit: snapshot.dataAudit ?? stateRef.current.dataAudit,
       previousSnapshot: snapshot.previousSnapshot,
       updatedAt: snapshot.updatedAt,
       savedAt: Date.now(),
@@ -534,7 +586,9 @@ function App() {
     await wait(80);
     dispatch({ type: 'step', step: 'parse', status: 'done' });
     dispatch({ type: 'step', step: 'infer', status: 'active' });
-    const schema = inferSchema(rows);
+    const schemaOverrides = {};
+    const schema = applySchemaOverrides(inferSchema(rows), schemaOverrides);
+    const dataAudit = stampAudit(incoming.health.audit);
     const parseHealth = buildParseHealth(rows, schema, incoming.health);
     await wait(80);
     dispatch({ type: 'patch', value: { schema, parseHealth } });
@@ -558,6 +612,8 @@ function App() {
         recipe,
         dataSource,
         parseHealth,
+        schemaOverrides,
+        dataAudit,
         previousSnapshot: null,
         updatedAt,
         pendingRecipe: null,
@@ -567,7 +623,7 @@ function App() {
         statusError: false,
       },
     });
-    persistSnapshot({ rows, schema, recipe, dataSource, parseHealth, previousSnapshot: null, updatedAt });
+    persistSnapshot({ rows, schema, recipe, dataSource, parseHealth, schemaOverrides, dataAudit, previousSnapshot: null, updatedAt });
   }, [flashStatus, notes, pasteText, persistSnapshot]);
 
   const ingestFile = useCallback((file: File) => {
@@ -629,14 +685,21 @@ function App() {
     const incoming = incomingKind(rawText);
     if (incoming.kind !== 'rows') throw new Error('Choose CSV or JSON row data, not a recipe.');
     const rows = incoming.rows;
-    const schema = inferSchema(rows);
+    const schema = applySchemaOverrides(inferSchema(rows), current.schemaOverrides);
+    const dataAudit = [
+      ...current.dataAudit,
+      ...stampAudit(incoming.health.audit),
+    ];
     const parseHealth = buildParseHealth(rows, schema, incoming.health);
     const previousSnapshot = captureDatasetSnapshot(
       current.rows,
       current.schema,
       current.updatedAt || Date.now(),
     );
-    const recipe = applyRecipeToRows(current.recipe, rows, schema, { dataSource });
+    const recipe = applyRecipeToRows(current.recipe, rows, schema, {
+      dataSource,
+      excludeOutliers: current.excludeOutliers,
+    });
     const updatedAt = Date.now();
     dispatch({
       type: 'patch',
@@ -647,6 +710,7 @@ function App() {
         dataSource,
         sourceText: rawText,
         parseHealth,
+        dataAudit,
         previousSnapshot,
         updatedAt,
         statusMessage: null,
@@ -659,6 +723,8 @@ function App() {
       recipe,
       dataSource,
       parseHealth,
+      schemaOverrides: current.schemaOverrides,
+      dataAudit,
       previousSnapshot,
       updatedAt,
       id: current.id,
@@ -808,6 +874,49 @@ function App() {
     }
   }, [flashStatus]);
 
+  const copyRecipeLink = useCallback(async () => {
+    const current = stateRef.current;
+    if (!current.recipe) return;
+    try {
+      const payload = buildRecipePayload({
+        recipe: current.recipe,
+        schema: current.schema,
+        rows: current.rows,
+        dataSource: null,
+        generatedAt: new Date().toISOString(),
+      });
+      const link = buildRecipeLink(`${window.location.origin}${window.location.pathname}`, payload);
+      await navigator.clipboard.writeText(link);
+      flashStatus('Recipe link copied');
+    } catch (error) {
+      flashStatus(error instanceof Error ? error.message : 'Could not copy recipe link', true);
+    }
+  }, [flashStatus]);
+
+  const exportStandalone = useCallback(() => {
+    const current = stateRef.current;
+    const dashboard = document.getElementById('stage-dash');
+    if (!current.recipe || !dashboard) return;
+    try {
+      const clone = dashboard.cloneNode(true) as HTMLElement;
+      clone.classList.add('is-active');
+      clone.querySelector('#recurring-report')?.remove();
+      clone.querySelectorAll('.widget-action,.assumption-chip,.table-export-btn,.retry-ai-btn,#data-health-btn').forEach(element => element.remove());
+      const html = buildStandaloneHtml({
+        title: current.recipe.title,
+        dashboardHtml: clone.outerHTML,
+        css: pageCssText(),
+        rows: current.rows,
+        schema: current.schema,
+        recipe: current.recipe,
+      });
+      downloadFile(exportFilename(current.recipe.title, 'html'), new Blob([html], { type: 'text/html;charset=utf-8' }));
+      flashStatus('Interactive HTML exported');
+    } catch (error) {
+      flashStatus(error instanceof Error ? error.message : 'HTML export failed', true);
+    }
+  }, [flashStatus]);
+
   const exportPng = useCallback(async () => {
     const current = stateRef.current;
     if (!current.recipe) return;
@@ -877,6 +986,56 @@ function App() {
       id: current.id,
     });
     flashStatus('Assumptions updated');
+  }, [flashStatus, persistSnapshot]);
+
+  const updateHealthIssue = useCallback((issue: DataHealthIssue, correct: boolean) => {
+    const current = stateRef.current;
+    if (!current.recipe || !current.parseHealth) return;
+    let schemaOverrides = current.schemaOverrides;
+    let schema = current.schema;
+    let excludeOutliers = current.excludeOutliers;
+    let action = 'acknowledged-health-warning';
+    let detail = `${issue.title}: ${issue.detail}`;
+    if (correct && issue.correction === 'treat-as-date' && issue.columns[0]) {
+      schemaOverrides = { ...current.schemaOverrides, [issue.columns[0]]: 'date' };
+      schema = applySchemaOverrides(inferSchema(current.rows), schemaOverrides);
+      action = 'schema-override';
+      detail = `Treat ${issue.columns[0]} as a date column.`;
+    } else if (correct && issue.correction === 'include-outliers') {
+      excludeOutliers = false;
+      action = 'outlier-override';
+      detail = 'Include statistical outliers in KPI calculations.';
+    }
+    const dataAudit = [...current.dataAudit, { at: Date.now(), action, detail }];
+    const parseHealth = buildParseHealth(current.rows, schema, current.parseHealth);
+    const recipe = applyRecipeToRows(current.recipe, current.rows, schema, {
+      dataSource: current.dataSource,
+      excludeOutliers,
+    });
+    dispatch({
+      type: 'patch',
+      value: {
+        schema,
+        schemaOverrides,
+        excludeOutliers,
+        dataAudit,
+        parseHealth,
+        recipe,
+      },
+    });
+    persistSnapshot({
+      rows: current.rows,
+      schema,
+      recipe,
+      dataSource: current.dataSource,
+      parseHealth,
+      schemaOverrides,
+      dataAudit,
+      previousSnapshot: current.previousSnapshot,
+      updatedAt: current.updatedAt || Date.now(),
+      id: current.id,
+    });
+    flashStatus(correct ? 'Data assumption updated' : 'Health warning acknowledged');
   }, [flashStatus, persistSnapshot]);
 
   const openInspector = useCallback((widget: RenderedWidget, selectedValue: unknown | null) => {
@@ -968,17 +1127,26 @@ function App() {
   const restoreRecent = useCallback((recent: RecentDashboard) => {
     setPasteText('');
     setChefInput('');
+    const schemaOverrides = recent.schemaOverrides || {};
+    const schema = applySchemaOverrides(inferSchema(recent.rows), schemaOverrides);
+    const parseHealth = buildParseHealth(
+      recent.rows,
+      schema,
+      recent.parseHealth || { rowsParsed: recent.rows.length, rowsDropped: 0, format: 'unknown' },
+    );
     dispatch({
       type: 'patch',
       value: {
         stage: 'dash',
         rows: recent.rows,
-        schema: recent.schema,
+        schema,
         recipe: recent.recipe,
         title: recent.title,
         id: recent.id,
         dataSource: recent.dataSource || null,
-        parseHealth: recent.parseHealth || buildParseHealth(recent.rows, recent.schema, { rowsParsed: recent.rows.length, rowsDropped: 0, format: 'unknown' }),
+        parseHealth,
+        schemaOverrides,
+        dataAudit: recent.dataAudit || stampAudit(parseHealth.audit),
         previousSnapshot: recent.previousSnapshot || null,
         updatedAt: recent.updatedAt || recent.savedAt,
         chefHistory: [],
@@ -1031,6 +1199,7 @@ function App() {
     return compareDatasets(state.previousSnapshot, state.rows, state.schema, state.recipe);
   }, [state.previousSnapshot, state.recipe, state.rows, state.schema]);
   const health = state.parseHealth;
+  const healthIssueCount = health?.issues.length || 0;
   const currentTitle = state.recipe?.title || state.title;
   const steps: Array<[LoadingStep, string]> = [['parse', 'Parse data'], ['infer', 'Infer schema'], ['layout', 'Propose layout'], ['render', 'Render dashboard']];
   return (
@@ -1113,7 +1282,43 @@ function App() {
       </section>
 
       <section id="stage-dash" className={`stage ${state.stage === 'dash' ? 'is-active' : ''}`}>
-        {state.recipe && <><div className="dash-head"><div className="eyebrow eyebrow-accent">— Dashboard —</div><h1 id="dash-title">{state.recipe.title}</h1><div id="dash-meta" className="dash-head-meta">{state.rows.length} rows · {state.schema.length} cols · updated {new Date(state.updatedAt || Date.now()).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</div>{health && <div id="dash-health" className="dash-health">{health.rowsParsed} row{health.rowsParsed === 1 ? '' : 's'} parsed · {health.rowsDropped} dropped{health.datesUnparsed ? ` · ${health.datesUnparsed} dates unparsed` : ''}{health.outlierCount ? ` · ${health.outlierCount} outlier${health.outlierCount === 1 ? '' : 's'}` : ''}</div>}</div><RecurringReportSummary state={state} comparison={comparison} now={clock} onCadence={setRefreshCadence} /><WidgetGrid recipe={state.recipe} rows={state.rows} schema={state.schema} changedWidgets={state.changedWidgets} comparisons={comparison?.kpis || []} onAssumptions={index => dispatch({ type: 'patch', value: { assumptionsWidgetIndex: index } })} onInspect={openInspector} onRetry={() => void retryAi()} onExportTable={exportTable} onCopyTable={widget => void copyTable(widget)} /></>}
+        {state.recipe && (
+          <>
+            <div className="dash-head">
+              <div className="eyebrow eyebrow-accent">— Dashboard —</div>
+              <h1 id="dash-title">{state.recipe.title}</h1>
+              <div id="dash-meta" className="dash-head-meta">
+                {state.rows.length} rows · {state.schema.length} cols · updated {new Date(state.updatedAt || Date.now()).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+              </div>
+              {health && (
+                <div id="dash-health" className="dash-health">
+                  <span>{health.rowsParsed} row{health.rowsParsed === 1 ? '' : 's'} parsed · {health.rowsDropped} dropped</span>
+                  <button id="data-health-btn" type="button" className={`health-summary ${healthIssueCount ? 'has-issues' : ''}`} onClick={() => dispatch({ type: 'patch', value: { healthOpen: true } })}>
+                    Data health · {healthIssueCount ? `${healthIssueCount} flag${healthIssueCount === 1 ? '' : 's'}` : 'clean'}
+                  </button>
+                </div>
+              )}
+              <div className="dash-share-actions">
+                <button id="share-recipe-link" type="button" className="btn btn-ghost" onClick={() => void copyRecipeLink()}>Copy recipe link</button>
+                <button id="export-html-btn" type="button" className="btn btn-ghost" onClick={exportStandalone}>Interactive HTML ↓</button>
+              </div>
+            </div>
+            <RecurringReportSummary state={state} comparison={comparison} now={clock} onCadence={setRefreshCadence} />
+            <WidgetGrid
+              recipe={state.recipe}
+              rows={state.rows}
+              schema={state.schema}
+              changedWidgets={state.changedWidgets}
+              comparisons={comparison?.kpis || []}
+              excludeOutliers={state.excludeOutliers}
+              onAssumptions={index => dispatch({ type: 'patch', value: { assumptionsWidgetIndex: index } })}
+              onInspect={openInspector}
+              onRetry={() => void retryAi()}
+              onExportTable={exportTable}
+              onCopyTable={widget => void copyTable(widget)}
+            />
+          </>
+        )}
       </section>
 
       {state.stage === 'dash' && !state.chefOpen && <button id="chef-fab" className="chef-fab is-visible" type="button" onClick={() => dispatch({ type: 'patch', value: { chefOpen: true } })}><span className="chef-fab-glyph">M</span><span>Talk to the chef</span></button>}
@@ -1128,6 +1333,15 @@ function App() {
 
       <AssumptionsDialog state={state} onClose={() => dispatch({ type: 'patch', value: { assumptionsWidgetIndex: null } })} onApply={applyAssumption} />
       <InspectorDialog state={state} onClose={() => dispatch({ type: 'patch', value: { inspector: null } })} />
+      <DataHealthDialog
+        open={state.healthOpen}
+        health={state.parseHealth}
+        audit={state.dataAudit}
+        excludeOutliers={state.excludeOutliers}
+        onClose={() => dispatch({ type: 'patch', value: { healthOpen: false } })}
+        onCorrect={issue => updateHealthIssue(issue, true)}
+        onIgnore={issue => updateHealthIssue(issue, false)}
+      />
     </>
   );
 }

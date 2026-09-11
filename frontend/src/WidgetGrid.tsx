@@ -29,6 +29,7 @@ interface WidgetGridProps {
   schema: SchemaColumn[];
   changedWidgets: Set<string>;
   comparisons: KpiComparison[];
+  excludeOutliers: boolean;
   onAssumptions: (index: number) => void;
   onInspect: (widget: RenderedWidget, selectedValue: unknown | null) => void;
   onRetry: () => void;
@@ -119,6 +120,7 @@ function KpiCard({
   rows,
   schema,
   comparison,
+  excludeOutliers,
   onAssumptions,
   onInspect,
 }: {
@@ -127,6 +129,7 @@ function KpiCard({
   rows: Row[];
   schema: SchemaColumn[];
   comparison?: KpiComparison;
+  excludeOutliers: boolean;
   onAssumptions: (index: number) => void;
   onInspect: (widget: RenderedWidget, selectedValue: unknown | null) => void;
 }) {
@@ -136,6 +139,7 @@ function KpiCard({
     schema,
     widget.aggregate,
     widget.format,
+    { excludeOutliers },
   );
   const spark = widget.sparkCol ? metricValues(widget.sparkCol, rows, schema) : [];
   const changed = comparison && comparison.absoluteChange !== 0;
@@ -584,6 +588,7 @@ export default function WidgetGrid({
   schema,
   changedWidgets,
   comparisons,
+  excludeOutliers,
   onAssumptions,
   onInspect,
   onRetry,
@@ -604,7 +609,7 @@ export default function WidgetGrid({
         const fingerprint = widgetFingerprint(widget);
         const className = changedWidgets.has(fingerprint) ? 'is-changed' : '';
         let content = null;
-        if (widget.type === 'kpi') content = <KpiCard widget={widget} index={index} rows={rows} schema={schema} comparison={comparisonsByWidget.get(fingerprint)} onAssumptions={onAssumptions} onInspect={onInspect} />;
+        if (widget.type === 'kpi') content = <KpiCard widget={widget} index={index} rows={rows} schema={schema} comparison={comparisonsByWidget.get(fingerprint)} excludeOutliers={excludeOutliers} onAssumptions={onAssumptions} onInspect={onInspect} />;
         else if (widget.type === 'observations') content = <ObservationsCard widget={widget} />;
         else if (widget.type === 'donut') content = <DonutCard widget={widget} index={index} rows={rows} schema={schema} onAssumptions={onAssumptions} onInspect={onInspect} />;
         else if (widget.type === 'statlist') content = <StatListCard widget={widget} index={index} rows={rows} schema={schema} onAssumptions={onAssumptions} onInspect={onInspect} />;
