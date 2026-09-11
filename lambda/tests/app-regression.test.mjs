@@ -696,8 +696,8 @@ test("brief, recipe inspector, and themes remain traceable and local", async () 
     await page.getByText("SAAS METRICS").click();
     await page.waitForSelector("#chef-fab.is-visible");
 
-    await page.locator("#theme-picker").selectOption("ocean");
-    assert.equal(await page.locator("body").getAttribute("data-theme"), "ocean");
+    await page.locator("#theme-picker").selectOption("marketing");
+    assert.equal(await page.locator("body").getAttribute("data-theme"), "marketing");
 
     await page.locator("#open-recipe-inspector").click();
     let text = await page.locator("#recipe-inspector-dialog").innerText();
@@ -721,7 +721,7 @@ test("brief, recipe inspector, and themes remain traceable and local", async () 
 
     await page.reload({ waitUntil: "networkidle" });
     await page.getByText("SaaS Growth Review").first().click();
-    assert.equal(await page.locator("#theme-picker").inputValue(), "ocean");
+    assert.equal(await page.locator("#theme-picker").inputValue(), "marketing");
   });
 });
 

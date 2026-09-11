@@ -57,7 +57,7 @@ export interface DataAuditEntry {
 }
 
 export type SchemaOverrides = Record<string, ColumnType>;
-export type DashboardTheme = 'mise' | 'ink' | 'ocean' | 'plum';
+export type DashboardTheme = 'mise' | 'ink' | 'ocean' | 'plum' | 'marketing';
 
 export interface ThresholdAlert {
   id: string;
