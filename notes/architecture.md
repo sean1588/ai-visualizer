@@ -1,6 +1,6 @@
 # Mise · architecture
 
-_How the app is built, where it runs, and why. Last updated: 2026-05-02._
+_How the app is built, where it runs, and why. Last updated: 2026-09-11._
 
 ---
 
@@ -8,7 +8,7 @@ _How the app is built, where it runs, and why. Last updated: 2026-05-02._
 
 - **Two products, two stacks, two subdomains.**
 - `mise.app` → Hugo static marketing site
-- `app.mise.app` → vanilla JS web app + serverless LLM proxy
+- `app.mise.app` → Vite + React + TypeScript web app + serverless LLM proxy
 - This split is intentional and should be preserved.
 
 ---
@@ -21,15 +21,14 @@ _How the app is built, where it runs, and why. Last updated: 2026-05-02._
 - Familiar tooling (other sites in the same stack)
 - Output is plain HTML/CSS — copy our Fraunces/IBM Plex Mono styles directly from `marketing.html`
 
-### App → Vanilla HTML/CSS/JS
-- Single-page in spirit; client-side state, file parsing in-browser, no SSR benefit
-- No framework needed for what we're doing — DOM is small (~3 stages, ~7 widget renderers, the chef panel)
-- Faster to load, easier to handoff, easier to debug
-- One bundle, one deploy
+### App → Vite + React + TypeScript
+- Single-page client application; file parsing and dashboard rendering remain in-browser
+- React owns stage, dialog, widget, and Chef state through one reducer
+- Pure TypeScript domain modules own parsing, profiling, aggregation, recipes, and formatting
+- Vite emits content-hashed assets; no SSR or application router is needed
 
 ### What we are explicitly NOT doing
 - **Not Next.js** for the app. Adds build complexity, RSC boundary surface, route handlers we don't need. We have one URL.
-- **Not React** for the app. The DOM is small; vanilla is faster to write and debug at this scale.
 - **Not a monorepo.** Two separate repos keeps deploys, dependencies, and concerns clean.
 
 ---
@@ -45,15 +44,19 @@ mise-marketing/     ← Hugo site → mise.app
   layouts/
   static/
 
-mise-app/           ← vanilla web app → app.mise.app
-  public/
-    index.html      ← entry point (rename from prototype.html)
-    app.js          ← rename from prototype-app.js
-    samples/
-  api/
+mise-app/           ← React web app → app.mise.app
+  frontend/
+    index.html
+    src/
+      domain/       ← pure parsing, profiling, recipe, and formatting logic
+      App.tsx       ← reducer-driven application shell
+      WidgetGrid.tsx
+    public/         ← static docs and sample assets
+    dist/           ← generated Vite build
+  lambda/
     cook.ts         ← serverless LLM proxy (see notes/backend.md)
   notes/            ← carry over the v1-scope, vocabulary, etc
-  README.md
+  infra/            ← S3, CloudFront, Lambda, and DNS
 ```
 
 The dev should not need to think about a monorepo, packages, or workspace tooling.
@@ -66,13 +69,10 @@ The dev should not need to think about a monorepo, packages, or workspace toolin
 Cloudflare Pages or Netlify pointing at `mise-marketing/`. Auto-deploy on push to `main`. Standard Hugo build.
 
 ### `app.mise.app` (app)
-**Recommended:** Cloudflare Pages + Functions.
-- Static assets from `public/` deploy directly
-- The single `/api/cook` endpoint deploys as a Function
-- Env vars (`LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`) set in the Pages dashboard
-- One deploy unit, one platform, one bill
-
-Vercel works equally well; pick whichever the dev is fluent in.
+The frontend builds with Vite, then Pulumi deploys the generated static assets
+to S3 behind CloudFront. CloudFront routes `/api/*` to the public Lambda Function
+URL and all other paths to S3. GitHub Actions builds and tests every package
+before a preview or production update.
 
 ### DNS
 - `mise.app` → marketing
@@ -87,7 +87,7 @@ We could put both behind one Next.js app on one domain. We are deliberately not 
 
 1. **Iteration speed.** Marketing needs frequent copy tweaks; app needs careful product changes. Different cadences should be different deploys.
 2. **Failure isolation.** A bug in the chef can't take down the landing page. A typo in marketing can't break the app.
-3. **Stack honesty.** Hugo is the right tool for a content site; vanilla JS is the right tool for a small SPA. Don't pick one to satisfy both.
+3. **Stack honesty.** Hugo is the right tool for a content site; React is now justified for the app's coordinated widget, dialog, history, and data-source state.
 4. **Cognitive load on the dev.** Two simple things are easier to work on than one complex thing.
 5. **Open source path.** The app is what we open-source eventually (trust through transparency). The marketing site stays private. Splitting now makes that trivial later.
 
@@ -115,8 +115,8 @@ The app should feel instant. Targets:
 
 - **First paint** < 500ms on a fast 3G connection
 - **Time to interactive** < 1s
-- **Total JS** < 80kb gzipped (currently we're under because no framework)
-- **No external scripts** beyond Google Fonts (which is async, doesn't block render)
+- **Initial JS** < 120kb gzipped; export-only code should remain lazy when practical
+- **No runtime-loaded scripts** beyond Google Fonts (which is async and doesn't block render)
 - **No analytics SDK.** If we add telemetry, it's a 200-byte fetch to our own endpoint — no Google Analytics, no Segment.
 
 ---
@@ -134,8 +134,8 @@ If a user shows up on IE11 or an old Android Browser, they get a polite "please 
 
 ## State persistence
 
-- **localStorage** for plates (saved dashboards) and chef history
-- Key: `mise_recents_v1` for plates, scoped by version so future schema changes don't corrupt old data
+- **localStorage** for plates (saved dashboards); Chef history is session-only
+- Key: `mise.recents.v1` for plates, scoped by version so future schema changes don't corrupt old data
 - **No IndexedDB** in v1 — localStorage's 5-10MB limit handles ~12 plates of typical size. Migrate when we hit complaints (see followups Tier 4).
 - **No cookies, no sessionStorage, no service workers.** Privacy story stays simple: *"data lives in this browser tab."*
 
@@ -150,19 +150,17 @@ If a user shows up on IE11 or an old Android Browser, they get a polite "please 
 
 ---
 
-## What changes between prototype and v1 production
+## Production boundaries
 
-| Concern | Prototype | Production |
-|---|---|---|
-| LLM call | `window.claude.complete()` | `fetch('/api/cook')` |
-| Files | `prototype.html`, `prototype-app.js` | `index.html`, `app.js` |
-| Env config | None | `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL` |
-| Hosting | Local preview | Cloudflare Pages + Function |
-| Domain | None | `app.mise.app` (app) + `mise.app` (marketing) |
-| Mobile | Desktop only | Responsive |
-| Telemetry | None | Optional minimal event ping (see followups Tier 1.4) |
-
-The prototype's *structure* survives. The dev's job is mostly: rename, replace one function (LLM call), wire up the proxy, deploy, and pass the mobile pass.
+| Concern | Owner |
+|---|---|
+| UI and state | React components + application reducer |
+| Parsing and analytical math | Pure TypeScript domain modules |
+| LLM and remote-data calls | `fetch('/api/cook')` and `fetch('/api/fetch-data')` |
+| Static build | Vite content-hashed assets |
+| Hosting | S3 + CloudFront + Lambda Function URL |
+| Persistence | Browser `localStorage` |
+| Marketing | Separate Hugo site |
 
 ---
 

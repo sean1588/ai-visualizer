@@ -1,5 +1,6 @@
 node_modules/
 dist/
+/public/
 *.log
 
 # Unzipped handoff working copy — the canonical artifact is AiVisualizer.zip,

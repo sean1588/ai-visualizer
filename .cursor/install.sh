@@ -5,6 +5,12 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+echo "==> frontend: install, typecheck, build"
+cd "$repo_root/frontend"
+npm ci
+npm run typecheck
+npm run build
+
 echo "==> lambda: install, build"
 cd "$repo_root/lambda"
 npm ci

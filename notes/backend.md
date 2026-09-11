@@ -149,7 +149,8 @@ async function complete(prompt) {
 }
 ```
 
-Two call sites to update: `planRecipe` (in `prototype-app.js`) and `chefSubmit`. Five-minute change.
+The React client keeps the two call paths in `frontend/src/App.tsx`: dashboard
+planning and Chef edits both use the shared `/api/cook` service wrapper.
 
 ---
 
