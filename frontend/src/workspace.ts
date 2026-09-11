@@ -9,9 +9,9 @@ import type {
   SchemaOverrides,
   ThresholdAlert,
 } from './domain';
-import { applyRecipeToRows } from './domain/recipes';
-import { applySchemaOverrides, inferSchema } from './domain/schema';
-import { widgetFingerprint } from './domain/widgets';
+import { applyRecipeToRows } from './domain/recipes.ts';
+import { applySchemaOverrides, inferSchema } from './domain/schema.ts';
+import { widgetFingerprint } from './domain/widgets.ts';
 import type { RecentDashboard } from './storage';
 
 export interface DashboardBundle {
