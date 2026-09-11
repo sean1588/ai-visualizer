@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import html2canvas from 'html2canvas';
 
 import {
   applyRecipeToRows,
@@ -48,7 +47,7 @@ import WidgetGrid from './WidgetGrid';
 
 declare global {
   interface Window {
-    html2canvas?: typeof html2canvas;
+    html2canvas?: typeof import('html2canvas')['default'];
     reset?: () => void;
     __mise?: Record<string, unknown>;
   }
@@ -558,7 +557,7 @@ function App() {
     const dashboard = document.getElementById('stage-dash');
     if (!dashboard) return;
     try {
-      const renderer = window.html2canvas || html2canvas;
+      const renderer = window.html2canvas || (await import('html2canvas')).default;
       const canvas = await renderer(dashboard, {
         backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#f5f2ec',
         scale: Math.min(2, window.devicePixelRatio || 1),
