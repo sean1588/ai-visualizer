@@ -13,6 +13,7 @@ import {
   widgetFingerprint,
   type DashboardRecipe,
   type GroupedWidget,
+  type KpiComparison,
   type KpiWidget,
   type ObservationsWidget,
   type RenderedWidget,
@@ -27,6 +28,7 @@ interface WidgetGridProps {
   rows: Row[];
   schema: SchemaColumn[];
   changedWidgets: Set<string>;
+  comparisons: KpiComparison[];
   onAssumptions: (index: number) => void;
   onInspect: (widget: RenderedWidget, selectedValue: unknown | null) => void;
   onRetry: () => void;
@@ -116,6 +118,7 @@ function KpiCard({
   index,
   rows,
   schema,
+  comparison,
   onAssumptions,
   onInspect,
 }: {
@@ -123,6 +126,7 @@ function KpiCard({
   index: number;
   rows: Row[];
   schema: SchemaColumn[];
+  comparison?: KpiComparison;
   onAssumptions: (index: number) => void;
   onInspect: (widget: RenderedWidget, selectedValue: unknown | null) => void;
 }) {
@@ -134,8 +138,9 @@ function KpiCard({
     widget.format,
   );
   const spark = widget.sparkCol ? metricValues(widget.sparkCol, rows, schema) : [];
+  const changed = comparison && comparison.absoluteChange !== 0;
   return (
-    <div className="w w-kpi" style={{ gridColumn: `span ${widget.span}` }}>
+    <div className={`w w-kpi${changed ? ' has-data-change' : ''}`} style={{ gridColumn: `span ${widget.span}` }}>
       <div className="kpi-top">
         <div className="label">{widget.label}</div>
         <WidgetActions widget={widget} index={index} onAssumptions={onAssumptions} onInspect={onInspect} />
@@ -143,7 +148,16 @@ function KpiCard({
       <div className="value">{computed.value}</div>
       {computed.delta !== null && (
         <div className={`delta ${computed.delta < 0 ? 'neg' : ''}`}>
-          {computed.delta >= 0 ? '↑' : '↓'} {Math.abs(computed.delta).toFixed(1)}% vs prev
+          {computed.delta >= 0 ? '↑' : '↓'} {Math.abs(computed.delta).toFixed(1)}% vs previous row
+        </div>
+      )}
+      {comparison && (
+        <div className={`dataset-delta ${comparison.absoluteChange < 0 ? 'neg' : ''}`}>
+          <strong>
+            {comparison.absoluteChange > 0 ? '+' : ''}
+            {formatCompact(comparison.absoluteChange, widget.metric, widget.format, { rows, schema })}
+          </strong>
+          {' '}vs previous dataset · was {formatCompact(comparison.previous, widget.metric, widget.format, { rows, schema })}
         </div>
       )}
       {computed.excludedOutlier && (
@@ -569,12 +583,14 @@ export default function WidgetGrid({
   rows,
   schema,
   changedWidgets,
+  comparisons,
   onAssumptions,
   onInspect,
   onRetry,
   onExportTable,
   onCopyTable,
 }: WidgetGridProps) {
+  const comparisonsByWidget = new Map(comparisons.map(comparison => [comparison.fingerprint, comparison]));
   return (
     <div id="dash-grid" className="dash-grid">
       {recipe.fallback && (
@@ -588,7 +604,7 @@ export default function WidgetGrid({
         const fingerprint = widgetFingerprint(widget);
         const className = changedWidgets.has(fingerprint) ? 'is-changed' : '';
         let content = null;
-        if (widget.type === 'kpi') content = <KpiCard widget={widget} index={index} rows={rows} schema={schema} onAssumptions={onAssumptions} onInspect={onInspect} />;
+        if (widget.type === 'kpi') content = <KpiCard widget={widget} index={index} rows={rows} schema={schema} comparison={comparisonsByWidget.get(fingerprint)} onAssumptions={onAssumptions} onInspect={onInspect} />;
         else if (widget.type === 'observations') content = <ObservationsCard widget={widget} />;
         else if (widget.type === 'donut') content = <DonutCard widget={widget} index={index} rows={rows} schema={schema} onAssumptions={onAssumptions} onInspect={onInspect} />;
         else if (widget.type === 'statlist') content = <StatListCard widget={widget} index={index} rows={rows} schema={schema} onAssumptions={onAssumptions} onInspect={onInspect} />;

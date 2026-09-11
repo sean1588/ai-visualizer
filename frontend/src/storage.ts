@@ -1,6 +1,7 @@
 import type {
   DashboardRecipe,
   DataSource,
+  DatasetSnapshot,
   ParseHealth,
   Row,
   SchemaColumn,
@@ -18,6 +19,8 @@ export interface RecentDashboard {
   recipe: DashboardRecipe;
   dataSource: DataSource | null;
   parseHealth: ParseHealth | null;
+  previousSnapshot?: DatasetSnapshot | null;
+  updatedAt?: number;
   savedAt: number;
   cols: number;
 }
