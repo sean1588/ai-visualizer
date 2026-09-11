@@ -6,6 +6,7 @@ import {
   applySchemaOverrides,
   applyRecipeToRows,
   buildDataProfile,
+  buildExecutiveBrief,
   buildParseHealth,
   buildRecipePayload,
   captureDatasetSnapshot,
@@ -15,10 +16,13 @@ import {
   contributingRows,
   deterministicRecipe,
   diffWidgets,
+  evaluateAlerts,
+  executiveBriefMarkdown,
   formatCompact,
   formatFull,
   incomingKind,
   inferSchema,
+  normalizePublicDataUrl,
   parseAndValidateRecipe,
   parseCsvRecords,
   parseJsonRecords,
@@ -386,6 +390,57 @@ test('HTTP freshness uses persisted cadence, attempts, and errors', () => {
   });
 });
 
+test('executive briefs and threshold alerts share deterministic KPI values', () => {
+  const rows: Row[] = [
+    { month: '2026-01-01', revenue: 40 },
+    { month: '2026-02-01', revenue: 60 },
+  ];
+  const schema = inferSchema(rows);
+  const recipe: DashboardRecipe = {
+    title: 'Revenue',
+    widgets: [{
+      type: 'kpi',
+      span: 3,
+      label: 'Total revenue',
+      title: 'Total revenue',
+      rationale: 'Total revenue summarizes the period.',
+      metric: 'revenue',
+      value: '100',
+      delta: null,
+      aggregate: 'sum',
+      format: 'currency',
+    }],
+  };
+  const alerts = evaluateAlerts([{
+    id: 'a1',
+    widgetFingerprint: widgetFingerprint(recipe.widgets[0]),
+    label: 'Total revenue',
+    metric: 'revenue',
+    aggregate: 'sum',
+    operator: 'above',
+    threshold: 90,
+  }], rows, schema);
+  assert.equal(alerts[0].current, 100);
+  assert.equal(alerts[0].triggered, true);
+
+  const brief = buildExecutiveBrief(recipe, rows, schema, null, buildParseHealth(rows, schema));
+  assert.equal(brief.claims[0].text, 'Total revenue is $100.');
+  assert.equal(brief.claims[0].supportingRows, 2);
+  assert.match(executiveBriefMarkdown(brief), /supporting rows.*#mise-widget-/);
+});
+
+test('public source URLs normalize Google Sheets and GitHub blob links only', () => {
+  assert.equal(
+    normalizePublicDataUrl('https://docs.google.com/spreadsheets/d/sheet-id/edit#gid=42'),
+    'https://docs.google.com/spreadsheets/d/sheet-id/export?format=csv&gid=42',
+  );
+  assert.equal(
+    normalizePublicDataUrl('https://github.com/acme/data/blob/main/report.csv'),
+    'https://raw.githubusercontent.com/acme/data/main/report.csv',
+  );
+  assert.equal(normalizePublicDataUrl('https://example.com/data.csv'), 'https://example.com/data.csv');
+});
+
 test('recipe payload construction is deterministic and rehydration is global-free', () => {
   const rows: Row[] = [
     { date: '2026-01-01', mrr: 100 },
@@ -443,10 +498,13 @@ test('recipe links omit data sources and standalone exports embed an interactive
     rows,
     schema,
     recipe,
+    theme: 'plum',
   });
   assert.match(html, /Interactive snapshot exported from Mise/);
   assert.match(html, /standalone-inspector/);
   assert.match(html, /data-inspect-widget/);
+  assert.match(html, /body data-theme="plum"/);
+  assert.match(html, /location\.hash==="#embed"/);
   assert.doesNotMatch(html, /private\.example/);
 });
 

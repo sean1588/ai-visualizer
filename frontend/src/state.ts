@@ -1,5 +1,6 @@
 import type {
   DashboardRecipe,
+  DashboardTheme,
   DataAuditEntry,
   DataSource,
   DatasetSnapshot,
@@ -8,6 +9,7 @@ import type {
   Row,
   SchemaColumn,
   SchemaOverrides,
+  ThresholdAlert,
 } from './domain';
 import type { RecentDashboard } from './storage';
 
@@ -69,6 +71,11 @@ export interface AppState {
   assumptionsWidgetIndex: number | null;
   inspector: InspectorState | null;
   healthOpen: boolean;
+  briefOpen: boolean;
+  recipeInspectorOpen: boolean;
+  alertsOpen: boolean;
+  alerts: ThresholdAlert[];
+  theme: DashboardTheme;
 }
 
 export const initialSteps: Record<LoadingStep, StepStatus> = {
@@ -113,6 +120,11 @@ export function createInitialState(recents: RecentDashboard[] = []): AppState {
     assumptionsWidgetIndex: null,
     inspector: null,
     healthOpen: false,
+    briefOpen: false,
+    recipeInspectorOpen: false,
+    alertsOpen: false,
+    alerts: [],
+    theme: 'mise',
   };
 }
 

@@ -4,6 +4,7 @@ import {
   applySchemaOverrides,
   applyRecipeToRows,
   buildDataProfile,
+  buildExecutiveBrief,
   buildParseHealth,
   buildRecipePayload,
   captureDatasetSnapshot,
@@ -13,6 +14,7 @@ import {
   csvEscape,
   deterministicRecipe,
   diffWidgets,
+  evaluateAlerts,
   flattenRows,
   formatCompact,
   formatFull,
@@ -24,6 +26,7 @@ import {
   isTableOnlyRecipe,
   metricValues,
   normalizeTableFields,
+  normalizePublicDataUrl,
   parseAndValidateRecipe,
   parseCsvRecords,
   parseInput,
@@ -36,6 +39,7 @@ import {
   validateRecipe,
   widgetFingerprint,
   type DashboardRecipe,
+  type DashboardTheme,
   type DataAuditEntry,
   type DataHealthIssue,
   type DataSource,
@@ -46,10 +50,12 @@ import {
   type Row,
   type SchemaColumn,
   type TableWidget,
+  type ThresholdAlert,
 } from './domain';
 import DataHealthDialog from './DataHealth';
 import ExampleGallery from './ExampleGallery';
 import { EXAMPLE_PLATES, type ExamplePlate } from './examples';
+import { AlertsDialog, ExecutiveBriefDialog, RecipeInspectorDialog } from './InsightsDialogs';
 import { buildChefPrompt, buildPrompt } from './prompts';
 import { complete, fetchRemoteData } from './services';
 import { buildRecipeLink, buildStandaloneHtml, decodeRecipeFragment } from './sharing';
@@ -496,6 +502,11 @@ function App() {
           chefWidgetIndex: null,
           recipeHistory: [],
           recipeHistoryIndex: -1,
+          alerts: [],
+          theme: 'mise',
+          briefOpen: false,
+          recipeInspectorOpen: false,
+          alertsOpen: false,
         },
       });
     };
@@ -509,6 +520,10 @@ function App() {
     const timer = window.setInterval(() => setClock(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, [state.stage]);
+
+  useEffect(() => {
+    document.body.dataset.theme = state.theme;
+  }, [state.theme]);
 
   const flashStatus = useCallback((message: string, error = false) => {
     if (statusTimer.current) window.clearTimeout(statusTimer.current);
@@ -527,6 +542,8 @@ function App() {
     parseHealth: AppState['parseHealth'];
     schemaOverrides?: AppState['schemaOverrides'];
     dataAudit?: DataAuditEntry[];
+    alerts?: ThresholdAlert[];
+    theme?: DashboardTheme;
     previousSnapshot: DatasetSnapshot | null;
     updatedAt: number;
     id?: string | null;
@@ -542,6 +559,8 @@ function App() {
       parseHealth: snapshot.parseHealth,
       schemaOverrides: snapshot.schemaOverrides ?? stateRef.current.schemaOverrides,
       dataAudit: snapshot.dataAudit ?? stateRef.current.dataAudit,
+      alerts: snapshot.alerts ?? stateRef.current.alerts,
+      theme: snapshot.theme ?? stateRef.current.theme,
       previousSnapshot: snapshot.previousSnapshot,
       updatedAt: snapshot.updatedAt,
       savedAt: Date.now(),
@@ -778,11 +797,14 @@ function App() {
       id: current.id,
     });
     setClock(updatedAt);
-    return rows.length;
+    return {
+      rowCount: rows.length,
+      triggeredAlerts: evaluateAlerts(current.alerts, rows, schema).filter(alert => alert.triggered).length,
+    };
   }, [persistSnapshot]);
 
   const runHttp = useCallback(async () => {
-    const url = httpUrl.trim();
+    const url = normalizePublicDataUrl(httpUrl);
     if (!url) {
       dispatch({ type: 'patch', value: { error: 'Enter an HTTP or HTTPS URL to fetch.' } });
       return;
@@ -826,8 +848,8 @@ function App() {
         lastAttemptAt: attemptedAt,
         lastError: null,
       };
-      const rowCount = applyDataUpdate(fetched.text, dataSource);
-      flashStatus(`Refreshed ${rowCount} rows`);
+      const result = applyDataUpdate(fetched.text, dataSource);
+      flashStatus(result.triggeredAlerts ? `${result.triggeredAlerts} threshold alert${result.triggeredAlerts === 1 ? '' : 's'} triggered` : `Refreshed ${result.rowCount} rows`, result.triggeredAlerts > 0);
     } catch (error) {
       console.warn('[refresh] failed', error);
       const latest = stateRef.current;
@@ -862,9 +884,9 @@ function App() {
     reader.onload = () => {
       const text = String(reader.result || '');
       try {
-        const rowCount = applyDataUpdate(text, null);
+        const result = applyDataUpdate(text, null);
         setPasteText(text);
-        flashStatus(`Replaced data · ${rowCount} rows`);
+        flashStatus(`Replaced data · ${result.rowCount} rows`);
       } catch (error) {
         flashStatus(error instanceof Error ? error.message : 'Could not replace data', true);
       } finally {
@@ -959,6 +981,7 @@ function App() {
         rows: current.rows,
         schema: current.schema,
         recipe: current.recipe,
+        theme: current.theme,
       });
       downloadFile(exportFilename(current.recipe.title, 'html'), new Blob([html], { type: 'text/html;charset=utf-8' }));
       flashStatus('Interactive HTML exported');
@@ -1101,6 +1124,50 @@ function App() {
     dispatch({ type: 'patch', value: { chefOpen: true, chefWidgetIndex: index } });
     window.setTimeout(() => document.getElementById('chef-input')?.focus(), 0);
   }, []);
+
+  const updateAlerts = useCallback((alerts: ThresholdAlert[]) => {
+    const current = stateRef.current;
+    if (!current.recipe) return;
+    dispatch({ type: 'patch', value: { alerts } });
+    persistSnapshot({
+      rows: current.rows,
+      schema: current.schema,
+      recipe: current.recipe,
+      dataSource: current.dataSource,
+      parseHealth: current.parseHealth,
+      alerts,
+      previousSnapshot: current.previousSnapshot,
+      updatedAt: current.updatedAt || Date.now(),
+      id: current.id,
+    });
+  }, [persistSnapshot]);
+
+  const setDashboardTheme = useCallback((theme: DashboardTheme) => {
+    const current = stateRef.current;
+    if (!current.recipe) return;
+    dispatch({ type: 'patch', value: { theme } });
+    persistSnapshot({
+      rows: current.rows,
+      schema: current.schema,
+      recipe: current.recipe,
+      dataSource: current.dataSource,
+      parseHealth: current.parseHealth,
+      theme,
+      previousSnapshot: current.previousSnapshot,
+      updatedAt: current.updatedAt || Date.now(),
+      id: current.id,
+    });
+    flashStatus(`${theme === 'mise' ? 'Mise' : humanize(theme)} theme applied`);
+  }, [flashStatus, persistSnapshot]);
+
+  const copyExecutiveBrief = useCallback(async (markdown: string) => {
+    try {
+      await navigator.clipboard.writeText(markdown);
+      flashStatus('Executive brief copied');
+    } catch {
+      flashStatus('Could not copy brief', true);
+    }
+  }, [flashStatus]);
 
   const updateHealthIssue = useCallback((issue: DataHealthIssue, correct: boolean) => {
     const current = stateRef.current;
@@ -1256,6 +1323,8 @@ function App() {
         parseHealth,
         schemaOverrides,
         dataAudit: recent.dataAudit || stampAudit(parseHealth.audit),
+        alerts: recent.alerts || [],
+        theme: recent.theme || 'mise',
         previousSnapshot: recent.previousSnapshot || null,
         updatedAt: recent.updatedAt || recent.savedAt,
         chefHistory: [],
@@ -1310,6 +1379,15 @@ function App() {
     if (!state.previousSnapshot || !state.recipe) return null;
     return compareDatasets(state.previousSnapshot, state.rows, state.schema, state.recipe);
   }, [state.previousSnapshot, state.recipe, state.rows, state.schema]);
+  const executiveBrief = useMemo(() => {
+    if (!state.recipe) return null;
+    return buildExecutiveBrief(state.recipe, state.rows, state.schema, comparison, state.parseHealth);
+  }, [comparison, state.parseHealth, state.recipe, state.rows, state.schema]);
+  const alertEvaluations = useMemo(
+    () => evaluateAlerts(state.alerts, state.rows, state.schema),
+    [state.alerts, state.rows, state.schema],
+  );
+  const triggeredAlerts = alertEvaluations.filter(alert => alert.triggered).length;
   const health = state.parseHealth;
   const healthIssueCount = health?.issues.length || 0;
   const currentTitle = state.recipe?.title || state.title;
@@ -1363,7 +1441,7 @@ function App() {
             <div className="http-source">
               <input id="http-url" className="http-source-input" type="url" inputMode="url" placeholder="https://api.example.com/data.json" value={httpUrl} onChange={event => setHttpUrl(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void runHttp(); }} />
               <button id="fetch-url-btn" type="button" className="btn btn-ghost" onClick={() => void runHttp()}>Fetch URL</button>
-              <div className="http-source-hint">GET endpoints returning JSON arrays/objects or CSV. Saved HTTP dashboards can refresh without asking the AI again.</div>
+              <div className="http-source-hint">GET endpoints returning JSON or CSV · Google Sheets share links and GitHub blob URLs are converted automatically · saved dashboards can refresh without asking the AI again.</div>
             </div>
             <div className="or"><span>or paste</span></div>
             <textarea id="paste" className="drop-paste" placeholder='Paste JSON or CSV — e.g. [{"month":"Jan","revenue":42000}, ...]' value={pasteText} onChange={event => setPasteText(event.target.value)} />
@@ -1414,8 +1492,12 @@ function App() {
                 </div>
               )}
               <div className="dash-share-actions">
+                <button id="open-brief" type="button" className="btn btn-ghost" onClick={() => dispatch({ type: 'patch', value: { briefOpen: true } })}>Executive brief</button>
+                <button id="open-recipe-inspector" type="button" className="btn btn-ghost" onClick={() => dispatch({ type: 'patch', value: { recipeInspectorOpen: true } })}>Inspect recipe</button>
+                <button id="open-alerts" type="button" className={`btn btn-ghost ${triggeredAlerts ? 'has-alert' : ''}`} disabled={!hasHttpSource(state.dataSource)} title={hasHttpSource(state.dataSource) ? 'Configure thresholds evaluated after while-open refreshes' : 'Threshold alerts require a refreshable HTTP source'} onClick={() => dispatch({ type: 'patch', value: { alertsOpen: true } })}>Alerts · {triggeredAlerts || state.alerts.length}</button>
                 <button id="share-recipe-link" type="button" className="btn btn-ghost" onClick={() => void copyRecipeLink()}>Copy recipe link</button>
-                <button id="export-html-btn" type="button" className="btn btn-ghost" onClick={exportStandalone}>Interactive HTML ↓</button>
+                <button id="export-html-btn" type="button" className="btn btn-ghost" title="The exported file supports ?embed or #embed mode" onClick={exportStandalone}>Interactive HTML ↓</button>
+                <label className="theme-picker"><span>Theme</span><select id="theme-picker" value={state.theme} onChange={event => setDashboardTheme(event.target.value as DashboardTheme)}><option value="mise">Mise</option><option value="ink">Ink</option><option value="ocean">Ocean</option><option value="plum">Plum</option></select></label>
               </div>
               <div className="recipe-history">
                 <button id="recipe-undo" type="button" className="btn btn-ghost" disabled={state.recipeHistoryIndex <= 0} onClick={() => navigateRecipeHistory(-1)}>↶ Undo</button>
@@ -1466,6 +1548,36 @@ function App() {
         onClose={() => dispatch({ type: 'patch', value: { healthOpen: false } })}
         onCorrect={issue => updateHealthIssue(issue, true)}
         onIgnore={issue => updateHealthIssue(issue, false)}
+      />
+      <ExecutiveBriefDialog
+        open={state.briefOpen}
+        brief={executiveBrief}
+        onClose={() => dispatch({ type: 'patch', value: { briefOpen: false } })}
+        onInspect={widget => {
+          dispatch({ type: 'patch', value: { briefOpen: false } });
+          openInspector(widget, null);
+        }}
+        onCopy={markdown => void copyExecutiveBrief(markdown)}
+      />
+      <RecipeInspectorDialog
+        open={state.recipeInspectorOpen}
+        recipe={state.recipe}
+        schema={state.schema}
+        dataSource={state.dataSource}
+        parseHealth={state.parseHealth}
+        schemaOverrides={state.schemaOverrides}
+        excludeOutliers={state.excludeOutliers}
+        onClose={() => dispatch({ type: 'patch', value: { recipeInspectorOpen: false } })}
+      />
+      <AlertsDialog
+        open={state.alertsOpen}
+        recipe={state.recipe}
+        rows={state.rows}
+        schema={state.schema}
+        evaluations={alertEvaluations}
+        onClose={() => dispatch({ type: 'patch', value: { alertsOpen: false } })}
+        onAdd={alert => updateAlerts([...stateRef.current.alerts, alert])}
+        onRemove={id => updateAlerts(stateRef.current.alerts.filter(alert => alert.id !== id))}
       />
     </>
   );

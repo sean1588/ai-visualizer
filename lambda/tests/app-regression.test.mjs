@@ -615,6 +615,90 @@ test("recipe links reapply without AI and standalone HTML keeps chart inspection
     await page.locator(".chart-hit").first().click();
     assert.equal(await page.locator("#standalone-inspector").getAttribute("hidden"), null);
     assert.match(await page.locator("#standalone-meta").innerText(), /matching row/i);
+    await page.evaluate(() => { location.hash = "embed"; });
+    await page.waitForFunction(() => document.body.classList.contains("mise-embed"));
+    assert.equal(await page.locator(".standalone-note").isVisible(), false);
+  });
+});
+
+test("brief, recipe inspector, and themes remain traceable and local", async () => {
+  await withPage(async page => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE_URL });
+    await mockInference(page);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.getByText("SAAS METRICS").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    await page.locator("#theme-picker").selectOption("ocean");
+    assert.equal(await page.locator("body").getAttribute("data-theme"), "ocean");
+
+    await page.locator("#open-recipe-inspector").click();
+    let text = await page.locator("#recipe-inspector-dialog").innerText();
+    assert.match(text, /Browser-local data/i);
+    assert.match(text, /Last-point outlier exclusion enabled/i);
+    assert.match(text, /Current MRR/i);
+    assert.match(text, /primary operating metric/i);
+    await page.locator("#recipe-inspector-dialog .dialog-close").click();
+
+    await page.locator("#open-brief").click();
+    text = await page.locator("#executive-brief-dialog").innerText();
+    assert.match(text, /Current MRR is \$102\.4k/i);
+    assert.match(text, /supporting rows/i);
+    await page.locator("#copy-brief").click();
+    const markdown = await page.evaluate(() => navigator.clipboard.readText());
+    assert.match(markdown, /# SaaS Growth Review — executive brief/);
+    assert.match(markdown, /#mise-widget-/);
+    await page.getByRole("button", { name: /View 12 supporting rows/i }).first().click();
+    assert.match(await page.locator("#inspector-title").innerText(), /Current MRR/i);
+    await page.locator("#inspector-close").click();
+
+    await page.reload({ waitUntil: "networkidle" });
+    await page.getByText("SaaS Growth Review").first().click();
+    assert.equal(await page.locator("#theme-picker").inputValue(), "ocean");
+  });
+});
+
+test("public source conveniences and while-open thresholds evaluate after refresh", async () => {
+  await withPage(async page => {
+    let fetchCalls = 0;
+    let requestedUrl = "";
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, AGGREGATE_PLAN);
+    await page.route("**/api/fetch-data", async route => {
+      fetchCalls++;
+      requestedUrl = route.request().postDataJSON().url;
+      const rows = fetchCalls === 1
+        ? SEGMENT_REVENUE
+        : [...SEGMENT_REVENUE, { segment: "enterprise", revenue: 30000, channel: "partner" }];
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          text: JSON.stringify(rows),
+          contentType: "application/json",
+          finalUrl: requestedUrl,
+        }),
+      });
+    });
+
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#http-url").fill("https://docs.google.com/spreadsheets/d/sheet-id/edit#gid=42");
+    await page.locator("#fetch-url-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+    assert.equal(requestedUrl, "https://docs.google.com/spreadsheets/d/sheet-id/export?format=csv&gid=42");
+
+    await page.locator("#open-alerts").click();
+    await page.locator('#alert-form select[name="widget"]').selectOption({ label: "Total Revenue" });
+    await page.locator('#alert-form input[name="threshold"]').fill("125000");
+    await page.locator('#alert-form button[type="submit"]').click();
+    assert.match(await page.locator("#alert-list").innerText(), /Watching/i);
+    await page.locator("#alerts-dialog .dialog-close").click();
+
+    await page.locator("#refresh-btn").click();
+    await page.waitForFunction(() => document.getElementById("status-pill")?.innerText.includes("THRESHOLD ALERT"));
+    assert.match(await page.locator("#open-alerts").innerText(), /Alerts · 1/i);
+    await page.locator("#open-alerts").click();
+    assert.match(await page.locator("#alert-list").innerText(), /Triggered/i);
+    assert.match(await page.locator("#alert-list").innerText(), /\$150k/i);
   });
 });
 

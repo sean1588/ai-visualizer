@@ -1,5 +1,6 @@
 import type {
   DashboardRecipe,
+  DashboardTheme,
   DataAuditEntry,
   DataSource,
   DatasetSnapshot,
@@ -7,6 +8,7 @@ import type {
   Row,
   SchemaColumn,
   SchemaOverrides,
+  ThresholdAlert,
 } from './domain';
 
 const STORAGE_KEY = 'mise.recents.v1';
@@ -23,6 +25,8 @@ export interface RecentDashboard {
   parseHealth: ParseHealth | null;
   schemaOverrides?: SchemaOverrides;
   dataAudit?: DataAuditEntry[];
+  alerts?: ThresholdAlert[];
+  theme?: DashboardTheme;
   previousSnapshot?: DatasetSnapshot | null;
   updatedAt?: number;
   savedAt: number;
