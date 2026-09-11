@@ -100,18 +100,17 @@ emits content-hashed assets, and the PNG renderer is bundled as a lazy chunk.
 - Add per-widget Chef entry with the widget already in context.
 - Explain why Mise selected each widget using the existing rationale field.
 
-## Later
-
-### New product ideas
+### Browser-local insight tools
 
 - Before/after dataset comparison with a local metric diff.
 - Threshold alerts evaluated while an HTTP dashboard is open.
 - A Markdown executive brief whose claims link back to metrics and rows.
 - A recipe inspector showing source, transformations, assumptions, and widgets.
-- XLSX ingestion when usage shows spreadsheet files are a material entry path.
 - Google Sheets and other public-data conveniences built on the HTTP source.
 - Embed mode for self-contained exports.
 - Brand palettes and export themes.
+
+## Architecture boundaries
 
 ### Paid and collaborative capabilities
 
@@ -168,3 +167,5 @@ chart inspection, Chef use, recurring refresh, and export type.
 - A template marketplace.
 - Full BI-style query building.
 - Hosted sharing as a shortcut around self-contained export.
+- XLSX ingestion until product usage shows spreadsheet files are a material
+  entry path.

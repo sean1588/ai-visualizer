@@ -3,6 +3,7 @@ import {
   widgetGroup,
   widgetMetric,
   type DashboardRecipe,
+  type DashboardTheme,
   type RecipePayload,
   type Row,
   type SchemaColumn,
@@ -80,6 +81,7 @@ export function buildStandaloneHtml(input: {
   rows: Row[];
   schema: SchemaColumn[];
   recipe: DashboardRecipe;
+  theme?: DashboardTheme;
 }): string {
   const widgets = Object.fromEntries(input.recipe.widgets.map(widget => [
     widgetFingerprint(widget),
@@ -105,9 +107,10 @@ export function buildStandaloneHtml(input: {
 #standalone-inspector[hidden]{display:none}#standalone-inspector{position:fixed;inset:0;z-index:100;background:rgba(31,28,22,.45);display:grid;place-items:center;padding:16px}
 .standalone-panel{width:min(900px,100%);max-height:90vh;overflow:auto;background:var(--bg);border:1px solid var(--rule);box-shadow:6px 6px 0 var(--rule);padding:20px}
 .standalone-panel header{display:flex;justify-content:space-between;gap:12px;align-items:center}.standalone-panel table{width:100%;border-collapse:collapse;margin-top:12px}.standalone-panel th,.standalone-panel td{padding:7px;border-bottom:1px solid var(--rule-soft);text-align:left}.standalone-panel input{width:100%;padding:9px;border:1px solid var(--rule-soft);margin-top:12px}
+body.mise-embed .standalone-note,body.mise-embed .dash-head{display:none}body.mise-embed .dash-grid{padding-top:14px}
 </style>
 </head>
-<body>
+<body data-theme="${input.theme || 'mise'}">
 <div class="standalone-note">Interactive snapshot exported from Mise · data stays inside this HTML file</div>
 ${input.dashboardHtml}
 <div id="standalone-inspector" hidden>
@@ -120,6 +123,8 @@ ${input.dashboardHtml}
 </div>
 <script>
 const payload=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob("${encodedData}"),c=>c.charCodeAt(0))));
+const applyEmbed=()=>document.body.classList.toggle("mise-embed",new URLSearchParams(location.search).has("embed")||location.hash==="#embed");
+applyEmbed();addEventListener("hashchange",applyEmbed);
 const inspector=document.getElementById("standalone-inspector");
 const search=document.getElementById("standalone-search");
 let selected=[];

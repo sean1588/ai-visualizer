@@ -57,6 +57,22 @@ export interface DataAuditEntry {
 }
 
 export type SchemaOverrides = Record<string, ColumnType>;
+export type DashboardTheme = 'mise' | 'ink' | 'ocean' | 'plum';
+
+export interface ThresholdAlert {
+  id: string;
+  widgetFingerprint: string;
+  label: string;
+  metric: string;
+  aggregate: KpiAggregate;
+  operator: 'above' | 'below';
+  threshold: number;
+}
+
+export interface AlertEvaluation extends ThresholdAlert {
+  current: number | null;
+  triggered: boolean;
+}
 
 export type WidgetSpan = 3 | 4 | 6 | 8 | 12;
 export type NumberFormat = 'auto' | 'number' | 'currency' | 'percent';
