@@ -141,6 +141,13 @@ const PERSONAL_NAME = /(^|[_.\s-])(email|e-mail|phone|mobile|ssn|social[_.\s-]?s
 const CREDENTIAL_NAME = /(^|[_.\s-])(password|passwd|secret|token|api[_.\s-]?key|access[_.\s-]?key)($|[_.\s-])/i;
 const EMAIL_VALUE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_VALUE = /^\+?[\d\s().-]{9,18}$/;
+const DATE_VALUE = /^\d{4}-\d{1,2}-\d{1,2}(?:[T\s]|$)/;
+
+function resemblesPhone(value: string): boolean {
+  if (DATE_VALUE.test(value) || !PHONE_VALUE.test(value)) return false;
+  const digits = value.replace(/\D/g, '');
+  return digits.length >= 10 && digits.length <= 15;
+}
 
 export function scanSensitiveColumns(
   rows: readonly Row[],
@@ -162,7 +169,7 @@ export function scanSensitiveColumns(
       if (EMAIL_VALUE.test(value)) {
         matchingRows++;
         if (!reasons.includes('values resemble email addresses')) reasons.push('values resemble email addresses');
-      } else if (column.type !== 'number' && PHONE_VALUE.test(value)) {
+      } else if (column.type !== 'number' && resemblesPhone(value)) {
         matchingRows++;
         if (!reasons.includes('values resemble phone numbers')) reasons.push('values resemble phone numbers');
       }
