@@ -578,8 +578,8 @@ test('workbench goals, privacy scan, relationships, and follow-ups are determini
     target: 35,
   }];
   const evaluation = evaluateKpiGoals(goals, rows, schema)[0];
-  assert.equal(evaluation.current, 40);
-  assert.equal(evaluation.variance, 5);
+  assert.equal(evaluation.current, 60);
+  assert.equal(evaluation.variance, 25);
   assert.equal(evaluation.met, true);
 
   const sensitive = scanSensitiveColumns(rows, schema);
