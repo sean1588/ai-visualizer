@@ -194,6 +194,9 @@ test("landing copy accurately describes local profiling", async () => {
     assert.match(text, /aggregate facts sent once for inference/i);
     assert.doesNotMatch(text, /Nothing is uploaded/i);
     assert.doesNotMatch(text, /Claude/i);
+    const favicon = await page.locator('link[rel="icon"]').getAttribute("href");
+    assert.equal(favicon, "/favicon.svg");
+    assert.equal((await page.request.get(`${BASE_URL}${favicon}`)).status(), 200);
   }, { allowConsole: /AI response did not validate, falling back/ });
 });
 
