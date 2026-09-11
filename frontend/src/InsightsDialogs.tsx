@@ -35,7 +35,8 @@ function widgetAssumptions(widget: DashboardRecipe['widgets'][number]): string {
   if (widget.type === 'donut' || widget.type === 'statlist') return `${widget.aggregate || 'auto'} ${widget.metric} by ${widget.cat} · ${widget.format || 'auto'}`;
   if (widget.type === 'countbar') return `count rows by ${widget.cat}`;
   if (widget.type === 'table') return `${widget.sort ? `sort ${widget.sort} ${widget.order || 'desc'} · ` : ''}limit ${widget.limit}`;
-  return `${widget.observations.length} profile observations`;
+  if (widget.type === 'observations') return `${widget.observations.length} profile observations`;
+  return widget.type;
 }
 
 export function RecipeInspectorDialog({
