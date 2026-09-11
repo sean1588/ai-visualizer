@@ -1,4 +1,4 @@
-import { kpiNumericValue } from './insights.ts';
+import { computeKpiNumeric } from './recipes.ts';
 import type {
   ColumnType,
   DashboardRecipe,
@@ -53,6 +53,7 @@ export interface CorrelationInsight {
   right: string;
   coefficient: number;
   strength: 'moderate' | 'strong';
+  observations: number;
 }
 
 export interface FollowUpQuestion {
@@ -81,6 +82,7 @@ function comparableValue(value: unknown): string {
 }
 
 function matchesFilter(row: Row, filter: DashboardFilter, schema: readonly SchemaColumn[]): boolean {
+  if (!filter || typeof filter.value !== 'string') return true;
   const value = row[filter.column];
   const column = schema.find(candidate => candidate.name === filter.column);
   if (!column) return true;
@@ -88,10 +90,20 @@ function matchesFilter(row: Row, filter: DashboardFilter, schema: readonly Schem
     return comparableValue(value).toLocaleLowerCase().includes(filter.value.toLocaleLowerCase());
   }
   if (filter.operator === 'equals') {
-    if (column.type === 'number') return Number(value) === Number(filter.value);
+    if (column.type === 'number') {
+      if (value === null || value === undefined || value === '') return false;
+      return Number(value) === Number(filter.value);
+    }
+    if (column.type === 'date') {
+      const current = Date.parse(comparableValue(value));
+      const target = Date.parse(filter.value);
+      if (!Number.isFinite(current) || !Number.isFinite(target)) return false;
+      return new Date(current).toISOString().slice(0, 10) === new Date(target).toISOString().slice(0, 10);
+    }
     return comparableValue(value).toLocaleLowerCase() === filter.value.toLocaleLowerCase();
   }
   if (filter.operator === 'at-least' || filter.operator === 'at-most') {
+    if (value === null || value === undefined || value === '') return false;
     const current = Number(value);
     const target = Number(filter.value);
     if (!Number.isFinite(current) || !Number.isFinite(target)) return false;
@@ -108,7 +120,7 @@ export function applyDashboardFilters(
   filters: readonly DashboardFilter[],
   schema: readonly SchemaColumn[],
 ): Row[] {
-  if (!filters.length) return [...rows];
+  if (!Array.isArray(filters) || !filters.length) return [...rows];
   return rows.filter(row => filters.every(filter => matchesFilter(row, filter, schema)));
 }
 
@@ -116,23 +128,27 @@ export function evaluateKpiGoals(
   goals: readonly KpiGoal[],
   rows: readonly Row[],
   schema: readonly SchemaColumn[],
+  options: { excludeOutliers?: boolean } = {},
 ): KpiGoalEvaluation[] {
   return goals.map(goal => {
-    const current = kpiNumericValue(goal.metric, goal.aggregate, rows, schema);
+    const current = computeKpiNumeric(goal.metric, rows, schema, goal.aggregate, options);
     const variance = current === null ? null : current - goal.target;
-    const progress = current === null || goal.target === 0
+    const met = current !== null && (
+      goal.direction === 'at-least'
+        ? current >= goal.target
+        : current <= goal.target
+    );
+    const progress = current === null
       ? null
-      : Math.max(0, Math.min(200, Math.abs(current / goal.target) * 100));
+      : met
+        ? 100
+        : Math.max(0, 100 - (Math.abs(current - goal.target) / Math.max(Math.abs(goal.target), 1)) * 100);
     return {
       ...goal,
       current,
       variance,
       progress,
-      met: current !== null && (
-        goal.direction === 'at-least'
-          ? current >= goal.target
-          : current <= goal.target
-      ),
+      met,
     };
   });
 }
@@ -149,6 +165,14 @@ function resemblesPhone(value: string): boolean {
   return digits.length >= 10 && digits.length <= 15;
 }
 
+function normalizedFieldName(value: string): string {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[^a-z0-9]+/gi, ' ')
+    .trim()
+    .toLocaleLowerCase();
+}
+
 export function scanSensitiveColumns(
   rows: readonly Row[],
   schema: readonly SchemaColumn[],
@@ -156,14 +180,15 @@ export function scanSensitiveColumns(
   return schema.flatMap(column => {
     const reasons: string[] = [];
     let kind: SensitiveColumnFinding['kind'] = 'personal';
-    if (CREDENTIAL_NAME.test(column.name)) {
+    const normalizedName = normalizedFieldName(column.name);
+    if (CREDENTIAL_NAME.test(normalizedName)) {
       reasons.push('field name suggests a credential or secret');
       kind = 'credential';
-    } else if (PERSONAL_NAME.test(column.name)) {
+    } else if (PERSONAL_NAME.test(normalizedName)) {
       reasons.push('field name suggests personal data');
     }
     let matchingRows = 0;
-    for (const row of rows.slice(0, 500)) {
+    for (const row of rows) {
       const value = comparableValue(row[column.name]).trim();
       if (!value) continue;
       if (EMAIL_VALUE.test(value)) {
@@ -180,7 +205,7 @@ export function scanSensitiveColumns(
 }
 
 function pearson(pairs: Array<[number, number]>): number | null {
-  if (pairs.length < 3) return null;
+  if (pairs.length < 5) return null;
   const leftMean = pairs.reduce((sum, pair) => sum + pair[0], 0) / pairs.length;
   const rightMean = pairs.reduce((sum, pair) => sum + pair[1], 0) / pairs.length;
   let numerator = 0;
@@ -225,6 +250,7 @@ export function findCorrelations(
         right,
         coefficient,
         strength: Math.abs(coefficient) >= 0.8 ? 'strong' : 'moderate',
+        observations: pairs.length,
       });
     }
   }

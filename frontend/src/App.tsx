@@ -477,6 +477,7 @@ function App() {
   const stateRef = useRef(state);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replacementInputRef = useRef<HTMLInputElement>(null);
+  const presentationReturnFocus = useRef<HTMLElement | null>(null);
   const statusTimer = useRef<number | null>(null);
   const refreshInFlight = useRef(false);
   const [pasteText, setPasteText] = useState('');
@@ -546,11 +547,16 @@ function App() {
   useEffect(() => {
     document.body.classList.toggle('presentation-mode', state.presentationMode);
     if (!state.presentationMode) return;
+    const focusTimer = window.setTimeout(() => document.getElementById('exit-presentation')?.focus(), 0);
     const exit = (event: KeyboardEvent) => {
       if (event.key === 'Escape') dispatch({ type: 'patch', value: { presentationMode: false } });
     };
     window.addEventListener('keydown', exit);
-    return () => window.removeEventListener('keydown', exit);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener('keydown', exit);
+      window.setTimeout(() => presentationReturnFocus.current?.isConnected && presentationReturnFocus.current.focus(), 0);
+    };
   }, [state.presentationMode]);
 
   const flashStatus = useCallback((message: string, error = false) => {
@@ -707,7 +713,21 @@ function App() {
         statusError: false,
       },
     });
-    persistSnapshot({ rows, schema, recipe, dataSource, parseHealth, schemaOverrides, dataAudit, previousSnapshot: null, updatedAt });
+    persistSnapshot({
+      rows,
+      schema,
+      recipe,
+      dataSource,
+      parseHealth,
+      schemaOverrides,
+      dataAudit,
+      filters: [],
+      savedViews: [],
+      kpiGoals: [],
+      dashboardNotes: options.notes ?? notes,
+      previousSnapshot: null,
+      updatedAt,
+    });
     track('dashboard_rendered', { source: ingestSource, fallback: !!recipe.fallback, widgets: recipe.widgets.length });
   }, [flashStatus, notes, pasteText, persistSnapshot]);
 
@@ -1388,7 +1408,9 @@ function App() {
   const restoreRecent = useCallback((recent: RecentDashboard) => {
     setPasteText('');
     setChefInput('');
-    const schemaOverrides = recent.schemaOverrides || {};
+    const schemaOverrides = recent.schemaOverrides && typeof recent.schemaOverrides === 'object' && !Array.isArray(recent.schemaOverrides)
+      ? recent.schemaOverrides
+      : {};
     const schema = applySchemaOverrides(inferSchema(recent.rows), schemaOverrides);
     const parseHealth = buildParseHealth(
       recent.rows,
@@ -1407,13 +1429,13 @@ function App() {
         dataSource: recent.dataSource || null,
         parseHealth,
         schemaOverrides,
-        dataAudit: recent.dataAudit || stampAudit(parseHealth.audit),
-        alerts: recent.alerts || [],
+        dataAudit: Array.isArray(recent.dataAudit) ? recent.dataAudit : stampAudit(parseHealth.audit),
+        alerts: Array.isArray(recent.alerts) ? recent.alerts : [],
         theme: recent.theme || 'mise',
-        filters: recent.filters || [],
-        savedViews: recent.savedViews || [],
-        kpiGoals: recent.kpiGoals || [],
-        dashboardNotes: recent.dashboardNotes || '',
+        filters: Array.isArray(recent.filters) ? recent.filters : [],
+        savedViews: Array.isArray(recent.savedViews) ? recent.savedViews : [],
+        kpiGoals: Array.isArray(recent.kpiGoals) ? recent.kpiGoals : [],
+        dashboardNotes: typeof recent.dashboardNotes === 'string' ? recent.dashboardNotes : '',
         workbenchOpen: false,
         presentationMode: false,
         previousSnapshot: recent.previousSnapshot || null,
@@ -1460,9 +1482,16 @@ function App() {
   const importDashboardBundle = useCallback((source: string) => {
     try {
       const imported = parseDashboardBundle(source);
-      if (!imported.rows.length) throw new Error('That backup does not contain any rows.');
       const schemaOverrides = imported.schemaOverrides || {};
       const schema = applySchemaOverrides(inferSchema(imported.rows), schemaOverrides);
+      const columns = new Set(schema.map(column => column.name));
+      const filters = (imported.filters || []).filter(filter => columns.has(filter.column));
+      const savedViews = (imported.savedViews || []).map(view => ({
+        ...view,
+        filters: view.filters.filter(filter => columns.has(filter.column)),
+      }));
+      const kpiGoals = (imported.kpiGoals || []).filter(goal => columns.has(goal.metric));
+      const alerts = (imported.alerts || []).filter(alert => columns.has(alert.metric));
       const recipe = applyRecipeToRows(imported.recipe, imported.rows, schema, { dataSource: imported.dataSource });
       const dashboard: RecentDashboard = {
         ...imported,
@@ -1476,6 +1505,10 @@ function App() {
           format: 'unknown',
         }),
         schemaOverrides,
+        filters,
+        savedViews,
+        kpiGoals,
+        alerts,
         savedAt: Date.now(),
         updatedAt: imported.updatedAt || Date.now(),
         cols: schema.length,
@@ -1484,8 +1517,11 @@ function App() {
       restoreRecent(dashboard);
       dispatch({ type: 'patch', value: { recents: loadRecents(), workbenchOpen: false } });
       flashStatus('Dashboard backup restored');
+      return null;
     } catch (error) {
-      flashStatus(error instanceof Error ? error.message : 'Could not restore that backup', true);
+      const message = error instanceof Error ? error.message : 'Could not restore that backup';
+      flashStatus(message, true);
+      return message;
     }
   }, [flashStatus, restoreRecent]);
 
@@ -1537,15 +1573,15 @@ function App() {
   }, [state.previousSnapshot, state.recipe, state.rows, state.schema]);
   const executiveBrief = useMemo(() => {
     if (!state.recipe) return null;
-    return buildExecutiveBrief(state.recipe, focusedRows, state.schema, comparison, state.parseHealth);
-  }, [comparison, focusedRows, state.parseHealth, state.recipe, state.schema]);
+    return buildExecutiveBrief(state.recipe, focusedRows, state.schema, state.filters.length ? null : comparison, state.parseHealth);
+  }, [comparison, focusedRows, state.filters.length, state.parseHealth, state.recipe, state.schema]);
   const alertEvaluations = useMemo(
     () => evaluateAlerts(state.alerts, state.rows, state.schema),
     [state.alerts, state.rows, state.schema],
   );
   const kpiGoalEvaluations = useMemo(
-    () => evaluateKpiGoals(state.kpiGoals, focusedRows, state.schema),
-    [focusedRows, state.kpiGoals, state.schema],
+    () => evaluateKpiGoals(state.kpiGoals, focusedRows, state.schema, { excludeOutliers: state.excludeOutliers }),
+    [focusedRows, state.excludeOutliers, state.kpiGoals, state.schema],
   );
   const triggeredAlerts = alertEvaluations.filter(alert => alert.triggered).length;
   const health = state.parseHealth;
@@ -1655,13 +1691,16 @@ function App() {
                 </div>
               )}
               <div className="dash-share-actions">
-                <button id="open-workbench" type="button" className="btn btn-primary" onClick={() => dispatch({ type: 'patch', value: { workbenchOpen: true } })}>Analyze</button>
+                <button id="open-workbench" type="button" className="btn btn-primary" onClick={() => dispatch({ type: 'patch', value: { workbenchOpen: true } })}>Analysis workbench</button>
                 <button id="open-brief" type="button" className="btn btn-ghost" onClick={() => dispatch({ type: 'patch', value: { briefOpen: true } })}>Executive brief</button>
                 <button id="open-recipe-inspector" type="button" className="btn btn-ghost" onClick={() => dispatch({ type: 'patch', value: { recipeInspectorOpen: true } })}>Inspect recipe</button>
                 <button id="open-alerts" type="button" className={`btn btn-ghost ${triggeredAlerts ? 'has-alert' : ''}`} disabled={!hasHttpSource(state.dataSource)} title={hasHttpSource(state.dataSource) ? 'Configure thresholds evaluated after while-open refreshes' : 'Threshold alerts require a refreshable HTTP source'} onClick={() => dispatch({ type: 'patch', value: { alertsOpen: true } })}>Alerts · {triggeredAlerts || state.alerts.length}</button>
                 <button id="share-recipe-link" type="button" className="btn btn-ghost" onClick={() => void copyRecipeLink()}>Copy recipe link</button>
                 <button id="export-html-btn" type="button" className="btn btn-ghost" title="The exported file supports ?embed or #embed mode" onClick={exportStandalone}>Interactive HTML ↓</button>
-                <button id="presentation-mode" type="button" className="btn btn-ghost" onClick={() => dispatch({ type: 'patch', value: { presentationMode: true } })}>Present</button>
+                <button id="presentation-mode" type="button" className="btn btn-ghost" onClick={event => {
+                  presentationReturnFocus.current = event.currentTarget;
+                  dispatch({ type: 'patch', value: { presentationMode: true } });
+                }}>Present</button>
                 <label className="theme-picker"><span>Theme</span><select id="theme-picker" value={state.theme} onChange={event => setDashboardTheme(event.target.value as DashboardTheme)}><option value="mise">Mise</option><option value="ink">Ink</option><option value="ocean">Ocean</option><option value="plum">Plum</option><option value="marketing">Marketing site</option></select></label>
               </div>
               <div className="recipe-history">
@@ -1674,12 +1713,12 @@ function App() {
               </div>
             </div>
             <RecurringReportSummary state={state} comparison={comparison} now={clock} onCadence={setRefreshCadence} />
-            <WidgetGrid
+            {focusedRows.length ? <WidgetGrid
               recipe={state.recipe}
               rows={focusedRows}
               schema={state.schema}
               changedWidgets={state.changedWidgets}
-              comparisons={comparison?.kpis || []}
+              comparisons={state.filters.length ? [] : comparison?.kpis || []}
               goals={kpiGoalEvaluations}
               excludeOutliers={state.excludeOutliers}
               onAssumptions={index => dispatch({ type: 'patch', value: { assumptionsWidgetIndex: index } })}
@@ -1689,7 +1728,7 @@ function App() {
               onCopyTable={widget => void copyTable(widget)}
               onEditWidget={editWidget}
               onChefWidget={openChefForWidget}
-            />
+            /> : <div id="focus-empty" className="focus-empty" role="status"><strong>No rows match this focused view.</strong><span>Clear or adjust a filter in the Analysis workbench to bring the dashboard back.</span><button type="button" className="btn btn-primary" onClick={() => updateWorkbench({ filters: [] })}>Clear filters</button></div>}
           </>
         )}
       </section>
@@ -1755,6 +1794,7 @@ function App() {
         savedViews={state.savedViews}
         kpiGoals={state.kpiGoals}
         dashboardNotes={state.dashboardNotes}
+        excludeOutliers={state.excludeOutliers}
         onClose={() => dispatch({ type: 'patch', value: { workbenchOpen: false } })}
         onFilters={filters => updateWorkbench({ filters })}
         onSavedViews={savedViews => updateWorkbench({ savedViews })}

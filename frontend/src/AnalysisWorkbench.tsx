@@ -20,6 +20,7 @@ import {
   type SchemaColumn,
 } from './domain';
 import { CloseButton, useDialog } from './InsightsDialogs';
+import { parseDashboardBundle } from './workspace';
 
 type WorkbenchTab = 'focus' | 'goals' | 'discover' | 'notes';
 
@@ -53,6 +54,7 @@ export default function AnalysisWorkbench({
   savedViews,
   kpiGoals,
   dashboardNotes,
+  excludeOutliers,
   onClose,
   onFilters,
   onSavedViews,
@@ -71,6 +73,7 @@ export default function AnalysisWorkbench({
   savedViews: SavedDashboardView[];
   kpiGoals: KpiGoal[];
   dashboardNotes: string;
+  excludeOutliers: boolean;
   onClose: () => void;
   onFilters: (filters: DashboardFilter[]) => void;
   onSavedViews: (views: SavedDashboardView[]) => void;
@@ -78,26 +81,39 @@ export default function AnalysisWorkbench({
   onDashboardNotes: (notes: string) => void;
   onPrompt: (prompt: string) => void;
   onExport: () => void;
-  onImport: (source: string) => void;
+  onImport: (source: string) => string | null;
 }) {
   const ref = useDialog(open);
   const importRef = useRef<HTMLInputElement>(null);
+  const importErrorRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<WorkbenchTab>('focus');
   const [columnName, setColumnName] = useState(schema[0]?.name || '');
   const [operator, setOperator] = useState<FilterOperator>(filterOperators(schema[0])[0]);
   const [notesDraft, setNotesDraft] = useState(dashboardNotes);
+  const [importError, setImportError] = useState('');
+  const [pendingImport, setPendingImport] = useState<{ source: string; title: string; rows: number; savedAt: number } | null>(null);
   const profile = useMemo(() => buildDataProfile(rows, schema), [rows, schema]);
   const privacyFindings = useMemo(() => scanSensitiveColumns(allRows, schema), [allRows, schema]);
   const correlations = useMemo(() => findCorrelations(rows, schema), [rows, schema]);
   const followUps = useMemo(() => recipe ? buildFollowUpQuestions(recipe, schema) : [], [recipe, schema]);
   const goalWidgets = useMemo(() => recipe ? kpiGoalsFromRecipe(recipe) : [], [recipe]);
-  const goalEvaluations = useMemo(() => evaluateKpiGoals(kpiGoals, rows, schema), [kpiGoals, rows, schema]);
+  const goalEvaluations = useMemo(
+    () => evaluateKpiGoals(kpiGoals, rows, schema, { excludeOutliers }),
+    [excludeOutliers, kpiGoals, rows, schema],
+  );
   const selectedColumn = schema.find(column => column.name === columnName);
   const operators = useMemo(() => filterOperators(selectedColumn), [selectedColumn]);
 
   useEffect(() => {
-    if (open) setNotesDraft(dashboardNotes);
+    if (open) {
+      setNotesDraft(dashboardNotes);
+      window.setTimeout(() => ref.current?.querySelector<HTMLButtonElement>('.workbench-tabs button.active')?.focus(), 0);
+    }
   }, [dashboardNotes, open]);
+
+  useEffect(() => {
+    if (importError) importErrorRef.current?.focus();
+  }, [importError]);
 
   useEffect(() => {
     if (!selectedColumn && schema[0]) {
@@ -153,20 +169,20 @@ export default function AnalysisWorkbench({
   };
 
   return (
-    <dialog id="analysis-workbench" className="mise-dialog workbench-dialog" ref={ref} onClose={onClose}>
+    <dialog id="analysis-workbench" className="mise-dialog workbench-dialog" ref={ref} aria-labelledby="workbench-title" onClose={onClose}>
       <div className="dialog-head">
-        <div><div className="eyebrow eyebrow-accent">Analysis workbench</div><h2>Explore without changing the recipe.</h2></div>
+        <div><div className="eyebrow eyebrow-accent">Analysis workbench</div><h2 id="workbench-title">Explore without changing the recipe.</h2></div>
         <CloseButton onClose={() => ref.current?.close()} />
       </div>
       <nav className="workbench-tabs" aria-label="Analysis tools">
         {(['focus', 'goals', 'discover', 'notes'] as WorkbenchTab[]).map(value => (
-          <button type="button" className={tab === value ? 'active' : ''} aria-pressed={tab === value} onClick={() => setTab(value)} key={value}>{humanize(value)}</button>
+          <button type="button" className={tab === value ? 'active' : ''} aria-pressed={tab === value} onClick={() => setTab(value)} key={value}>{value === 'notes' ? 'Notes & backup' : humanize(value)}</button>
         ))}
       </nav>
       <div className="dialog-body workbench-body">
         {tab === 'focus' && (
           <section className="workbench-section">
-            <div className="workbench-intro"><div><span className="eyebrow">Focus filters</span><h3>{rows.length} of {allRows.length} rows in view</h3></div><button type="button" className="btn btn-ghost" disabled={!filters.length} onClick={() => onFilters([])}>Clear filters</button></div>
+            <div className="workbench-intro"><div role="status" aria-live="polite"><span className="eyebrow">Focus filters</span><h3>{rows.length} of {allRows.length} rows in view</h3></div><button type="button" className="btn btn-ghost" disabled={!filters.length} onClick={() => onFilters([])}>Clear filters</button></div>
             <form id="focus-filter-form" className="workbench-form" onSubmit={addFilter}>
               <label><span>Column</span><select name="column" value={columnName} onChange={event => setColumnName(event.target.value)}>{schema.map(column => <option value={column.name} key={column.name}>{humanize(column.name)}</option>)}</select></label>
               <label><span>Rule</span><select name="operator" value={operator} onChange={event => setOperator(event.target.value as FilterOperator)}>{operators.map(value => <option value={value} key={value}>{OPERATOR_LABELS[value]}</option>)}</select></label>
@@ -179,7 +195,7 @@ export default function AnalysisWorkbench({
             </div>
             <div className="saved-view-panel">
               <div><span className="eyebrow">Saved views</span><p>Keep useful slices with this plate.</p></div>
-              <form id="save-view-form" onSubmit={saveView}><input name="name" placeholder="e.g. Enterprise only" required /><button type="submit" className="btn btn-ghost" disabled={!filters.length}>Save current view</button></form>
+              <form id="save-view-form" onSubmit={saveView}><label><span>View name</span><input name="name" placeholder="e.g. Enterprise only" required /></label><button type="submit" className="btn btn-ghost" disabled={!filters.length}>Save current view</button></form>
               <div id="saved-view-list">{savedViews.map(view => <article key={view.id}><button type="button" onClick={() => onFilters(view.filters.map(filter => ({ ...filter })))}><strong>{view.name}</strong><small>{view.filters.length} filter{view.filters.length === 1 ? '' : 's'}</small></button><button type="button" aria-label={`Delete ${view.name}`} onClick={() => onSavedViews(savedViews.filter(candidate => candidate.id !== view.id))}>×</button></article>)}</div>
             </div>
           </section>
@@ -204,19 +220,20 @@ export default function AnalysisWorkbench({
         {tab === 'discover' && (
           <section className="workbench-section discover-grid">
             <article className="discover-panel column-profile-panel">
-              <span className="eyebrow">Column profiles</span>
+              <span className="eyebrow">Column profiles · focused view</span>
               <h3>Know the shape before trusting the chart.</h3>
               <div id="column-profile-list">{profile.facts.map(fact => <div key={fact.column}><strong>{humanize(fact.column)}</strong><span>{fact.type}</span><small>{profileDetail(fact)}</small></div>)}</div>
             </article>
             <article className="discover-panel">
-              <span className="eyebrow">Relationship finder</span>
+              <span className="eyebrow">Relationship finder · focused view</span>
               <h3>Strong numeric movement, found locally.</h3>
-              <div id="correlation-list">{correlations.length ? correlations.map(item => <div key={`${item.left}-${item.right}`}><strong>{humanize(item.left)} ↔ {humanize(item.right)}</strong><span>{item.coefficient > 0 ? '+' : ''}{item.coefficient.toFixed(2)} · {item.strength}</span></div>) : <p>No moderate correlations found in this view.</p>}</div>
+              <div id="correlation-list">{correlations.length ? correlations.map(item => <div key={`${item.left}-${item.right}`}><strong>{humanize(item.left)} ↔ {humanize(item.right)}</strong><span>{item.coefficient > 0 ? '+' : ''}{item.coefficient.toFixed(2)} · {item.strength} · n={item.observations}</span></div>) : <p>No moderate correlations with at least five complete observations were found in this view.</p>}</div>
               <small>Correlation is a lead to investigate, not evidence of causation.</small>
             </article>
             <article className="discover-panel">
-              <span className="eyebrow">Privacy scan</span>
+              <span className="eyebrow">Privacy scan · full dataset</span>
               <h3>Potential sensitive fields stay visible to you.</h3>
+              <small>Scanned all {allRows.length.toLocaleString()} rows locally.</small>
               <div id="privacy-finding-list">{privacyFindings.length ? privacyFindings.map(finding => <div className={finding.kind} key={finding.column}><strong>{humanize(finding.column)}</strong><span>{finding.kind}</span><small>{finding.reasons.join(' · ')}{finding.matchingRows ? ` · ${finding.matchingRows} matching rows` : ''}</small></div>) : <p>No obvious personal or credential fields detected.</p>}</div>
             </article>
             <article className="discover-panel">
@@ -232,7 +249,7 @@ export default function AnalysisWorkbench({
             <article>
               <span className="eyebrow">Dashboard context</span>
               <h3>Leave the “why” beside the “what.”</h3>
-              <textarea id="dashboard-notes" value={notesDraft} maxLength={4000} placeholder="Decision context, caveats, owners, or next steps…" onChange={event => setNotesDraft(event.target.value)} />
+              <label className="workbench-field"><span>Context note</span><textarea id="dashboard-notes" value={notesDraft} maxLength={4000} placeholder="Decision context, caveats, owners, or next steps…" onChange={event => setNotesDraft(event.target.value)} /></label>
               <button type="button" className="btn btn-primary" onClick={() => onDashboardNotes(notesDraft.trim())}>Save context</button>
             </article>
             <article>
@@ -240,11 +257,31 @@ export default function AnalysisWorkbench({
               <h3>Move the whole working plate.</h3>
               <p>Backups contain the rows, recipe, filters, goals, notes, source settings, and theme. Nothing is uploaded.</p>
               <div className="dialog-actions"><button id="export-dashboard-bundle" type="button" className="btn btn-ghost" onClick={onExport}>Download backup</button><button id="import-dashboard-bundle" type="button" className="btn btn-ghost" onClick={() => importRef.current?.click()}>Restore backup</button></div>
+              {pendingImport && <div id="backup-preview" className="backup-preview"><strong>{pendingImport.title}</strong><span>{pendingImport.rows.toLocaleString()} rows · saved {new Date(pendingImport.savedAt).toLocaleString()}</span><button type="button" className="btn btn-primary" onClick={() => {
+                const error = onImport(pendingImport.source);
+                if (error) {
+                  setImportError(error);
+                  return;
+                }
+                setPendingImport(null);
+                setImportError('');
+              }}>Restore this backup</button></div>}
+              {importError && <div id="backup-import-error" className="dialog-error" role="alert" tabIndex={-1} ref={importErrorRef}>{importError}</div>}
               <input id="dashboard-bundle-input" ref={importRef} type="file" accept=".mise.json,.json,application/json" hidden onChange={event => {
                 const file = event.target.files?.[0];
                 if (!file) return;
                 const reader = new FileReader();
-                reader.onload = () => onImport(String(reader.result || ''));
+                reader.onload = () => {
+                  const source = String(reader.result || '');
+                  try {
+                    const dashboard = parseDashboardBundle(source);
+                    setPendingImport({ source, title: dashboard.title, rows: dashboard.rows.length, savedAt: dashboard.savedAt });
+                    setImportError('');
+                  } catch (error) {
+                    setPendingImport(null);
+                    setImportError(error instanceof Error ? error.message : 'Could not read that backup.');
+                  }
+                };
                 reader.readAsText(file);
                 event.currentTarget.value = '';
               }} />

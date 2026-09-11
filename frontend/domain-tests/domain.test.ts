@@ -554,6 +554,8 @@ test('workbench goals, privacy scan, relationships, and follow-ups are determini
     { date: '2026-02-01', segment: 'Pro', revenue: 20, orders: 4, customer_email: 'lin@example.com' },
     { date: '2026-03-01', segment: 'Pro', revenue: 30, orders: 6, customer_email: 'sam@example.com' },
     { date: '2026-04-01', segment: 'Team', revenue: 40, orders: 8, customer_email: 'jo@example.com' },
+    { date: '2026-05-01', segment: 'Team', revenue: 50, orders: 10, customer_email: 'max@example.com' },
+    { date: '2026-06-01', segment: 'Pro', revenue: 60, orders: 12, customer_email: 'ivy@example.com' },
   ];
   const schema = inferSchema(rows);
   const recipe: DashboardRecipe = {
@@ -582,14 +584,67 @@ test('workbench goals, privacy scan, relationships, and follow-ups are determini
 
   const sensitive = scanSensitiveColumns(rows, schema);
   assert.equal(sensitive[0].column, 'customer_email');
-  assert.equal(sensitive[0].matchingRows, 4);
+  assert.equal(sensitive[0].matchingRows, 6);
   const correlations = findCorrelations(rows, schema);
   assert.deepEqual(correlations[0], {
     left: 'revenue',
     right: 'orders',
     coefficient: 1,
     strength: 'strong',
+    observations: 6,
   });
   const questions = buildFollowUpQuestions(recipe, schema);
   assert.deepEqual(questions.map(question => question.id), ['trend', 'segments', 'relationship', 'top-records']);
+});
+
+test('focus filters distinguish missing zeroes and compare date calendar days', () => {
+  const rows: Row[] = [
+    { recorded_at: '2026-01-01T00:00:00Z', amount: null },
+    { recorded_at: '2026-01-01T16:30:00Z', amount: 0 },
+    { recorded_at: '2026-01-02T00:00:00Z', amount: 4 },
+  ];
+  const schema: SchemaColumn[] = [
+    { name: 'recorded_at', type: 'date', stat: '3 dates', unique: 3, asPercent: false },
+    { name: 'amount', type: 'number', stat: '2 values', unique: 2, asPercent: false },
+  ];
+  assert.deepEqual(applyDashboardFilters(rows, [{ id: 'zero', column: 'amount', operator: 'equals', value: '0' }], schema), [rows[1]]);
+  assert.deepEqual(applyDashboardFilters(rows, [{ id: 'day', column: 'recorded_at', operator: 'equals', value: '2026-01-01' }], schema), rows.slice(0, 2));
+});
+
+test('goal evaluation shares last-point outlier policy and direction-aware progress', () => {
+  const rows = [10, 11, 9, 10, 10, 11, 9, 1000].map(value => ({ value }));
+  const schema = inferSchema(rows);
+  const base = {
+    id: 'goal',
+    widgetFingerprint: 'value',
+    label: 'Value',
+    metric: 'value',
+    aggregate: 'last' as const,
+    target: 100,
+  };
+  const excluded = evaluateKpiGoals([{ ...base, direction: 'at-least' }], rows, schema, { excludeOutliers: true })[0];
+  const included = evaluateKpiGoals([{ ...base, direction: 'at-least' }], rows, schema, { excludeOutliers: false })[0];
+  assert.equal(excluded.current, 9);
+  assert.equal(excluded.met, false);
+  assert.equal(included.current, 1000);
+  assert.equal(included.met, true);
+  const atMost = evaluateKpiGoals([{ ...base, direction: 'at-most' }], [{ value: 10 }], schema)[0];
+  assert.equal(atMost.met, true);
+  assert.equal(atMost.progress, 100);
+  const missedAtMost = evaluateKpiGoals([{ ...base, direction: 'at-most' }], [{ value: 150 }], schema)[0];
+  assert.equal(missedAtMost.met, false);
+  assert.equal(missedAtMost.progress, 50);
+  const zeroTarget = evaluateKpiGoals([{ ...base, direction: 'at-least', target: 0 }], [{ value: -1 }], schema)[0];
+  assert.equal(zeroTarget.progress, 0);
+});
+
+test('privacy scan covers complete datasets and normalized camel-case names', () => {
+  const rows: Row[] = Array.from({ length: 501 }, (_, index) => ({
+    customerEmail: index === 500 ? 'last@example.com' : '',
+    secretToken: index === 0 ? 'redacted' : '',
+  }));
+  const schema = inferSchema(rows);
+  const findings = scanSensitiveColumns(rows, schema);
+  assert.equal(findings.find(finding => finding.column === 'customerEmail')?.matchingRows, 1);
+  assert.equal(findings.find(finding => finding.column === 'secretToken')?.kind, 'credential');
 });

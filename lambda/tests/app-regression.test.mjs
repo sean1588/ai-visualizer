@@ -100,6 +100,8 @@ const WORKBENCH_ROWS = [
   { date: "2026-03-01", segment: "Pro", revenue: 30, orders: 6, customer_email: "sam@example.com" },
   { date: "2026-04-01", segment: "Team", revenue: 40, orders: 8, customer_email: "jo@example.com" },
   { date: "2026-05-01", segment: "Pro", revenue: 50, orders: 10, customer_email: "max@example.com" },
+  { date: "2026-06-01", segment: "Pro", revenue: 60, orders: 12, customer_email: "ivy@example.com" },
+  { date: "2026-07-01", segment: "Pro", revenue: 70, orders: 14, customer_email: "lee@example.com" },
 ];
 
 const WORKBENCH_PLAN = {
@@ -452,6 +454,9 @@ test("coarse-pointer controls meet the 44px touch target baseline", async () => 
     await page.getByText("SAAS METRICS").click();
     await page.waitForSelector("#chef-fab.is-visible");
     assert.ok(await page.locator(".assumption-chip").first().evaluate(element => element.getBoundingClientRect().height) >= 44);
+    await page.locator("#open-workbench").click();
+    assert.ok(await page.locator(".workbench-tabs button").first().evaluate(element => element.getBoundingClientRect().height) >= 44);
+    assert.ok(await page.locator("#focus-filter-form select").first().evaluate(element => element.getBoundingClientRect().height) >= 44);
   }, { context: { hasTouch: true, viewport: devices["iPhone 14 Pro"].viewport } });
 });
 
@@ -750,24 +755,38 @@ test("analysis workbench keeps ten browser-local enhancements cohesive and persi
     await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, WORKBENCH_PLAN);
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
     await page.locator("#paste").fill(JSON.stringify(WORKBENCH_ROWS));
+    await page.locator("#notes").fill("Initial workbench context.");
     await page.locator("#render-btn").click();
     await page.waitForSelector("#chef-fab.is-visible");
+    await page.reload({ waitUntil: "networkidle" });
+    await page.getByText("Segment Workbench").first().click();
+    assert.match(await page.locator("#dashboard-context").innerText(), /Initial workbench context/i);
 
     await page.locator("#open-workbench").click();
     await page.waitForSelector("#analysis-workbench[open]");
     const workbench = page.locator("#analysis-workbench");
     assert.match(await workbench.innerText(), /Explore without changing the recipe/i);
+    assert.equal(await workbench.getAttribute("aria-labelledby"), "workbench-title");
+    await page.waitForFunction(() => document.activeElement?.textContent?.trim() === "Focus");
 
     await workbench.locator("#focus-filter-form select[name=column]").selectOption("segment");
     await workbench.locator("#focus-filter-form select[name=operator]").selectOption("equals");
     await workbench.locator("#focus-filter-form input[name=value]").fill("Pro");
     await workbench.locator("#focus-filter-form button[type=submit]").click();
-    await page.waitForFunction(() => document.querySelector("#focus-summary")?.textContent?.includes("3 of 5 rows"));
+    await page.waitForFunction(() => document.querySelector("#focus-summary")?.textContent?.includes("5 of 7 rows"));
     assert.match(await page.locator("#focus-summary").innerText(), /1 active filter/i);
 
     await workbench.locator("#save-view-form input[name=name]").fill("Pro accounts");
     await workbench.locator("#save-view-form button[type=submit]").click();
     assert.match(await workbench.locator("#saved-view-list").innerText(), /Pro accounts/i);
+    await workbench.locator("#focus-filter-form select[name=column]").selectOption("segment");
+    await workbench.locator("#focus-filter-form select[name=operator]").selectOption("equals");
+    await workbench.locator("#focus-filter-form input[name=value]").fill("Missing");
+    await workbench.locator("#focus-filter-form button[type=submit]").click();
+    await page.locator("#focus-empty").waitFor();
+    assert.match(await page.locator("#focus-empty").innerText(), /No rows match/i);
+    await workbench.locator("#saved-view-list article > button").first().click();
+    await page.waitForFunction(() => !document.querySelector("#focus-empty"));
 
     await workbench.getByRole("button", { name: "Goals" }).click();
     await workbench.locator("#kpi-goal-form input[name=target]").fill("45");
@@ -786,7 +805,7 @@ test("analysis workbench keeps ten browser-local enhancements cohesive and persi
     await page.locator("#chef-close").click();
 
     await page.locator("#open-workbench").click();
-    await workbench.getByRole("button", { name: "Notes" }).click();
+    await workbench.getByRole("button", { name: "Notes & backup" }).click();
     await workbench.locator("#dashboard-notes").fill("Review Pro growth with finance.");
     await workbench.getByRole("button", { name: "Save context" }).click();
     assert.match(await page.locator("#dashboard-context").innerText(), /Review Pro growth with finance/i);
@@ -801,14 +820,48 @@ test("analysis workbench keeps ten browser-local enhancements cohesive and persi
     assert.equal(backup.dashboard.savedViews[0].name, "Pro accounts");
     assert.equal(backup.dashboard.dashboardNotes, "Review Pro growth with finance.");
 
-    await workbench.locator("#dashboard-bundle-input").setInputFiles(downloadPath);
+    await workbench.locator("#dashboard-bundle-input").setInputFiles({
+      name: "broken.mise.json",
+      mimeType: "application/json",
+      buffer: Buffer.from("{not json"),
+    });
+    await workbench.locator("#backup-import-error").waitFor();
+    assert.match(await workbench.locator("#backup-import-error").innerText(), /not valid JSON/i);
+    assert.ok(await page.locator("#root").count());
+
+    let importedRefreshes = 0;
+    page.on("request", request => {
+      if (request.url().includes("/api/fetch-data")) importedRefreshes++;
+    });
+    backup.dashboard.filters = "not-an-array";
+    backup.dashboard.dataSource = {
+      type: "http",
+      url: "https://example.com/data.json",
+      refreshMinutes: 5,
+    };
+    await workbench.locator("#dashboard-bundle-input").setInputFiles({
+      name: "portable.mise.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(backup)),
+    });
+    await workbench.locator("#backup-preview").waitFor();
+    await workbench.getByRole("button", { name: "Restore this backup" }).click();
     await page.waitForFunction(() => !document.querySelector("#analysis-workbench")?.hasAttribute("open"));
     assert.match(await page.locator("#dash-title").innerText(), /Segment Workbench/i);
+    assert.deepEqual(await page.evaluate(() => ({
+      filters: window.__mise.state.filters,
+      refreshMinutes: window.__mise.state.dataSource.refreshMinutes,
+    })), { filters: [], refreshMinutes: 0 });
+    assert.equal(importedRefreshes, 0);
 
     await page.locator("#presentation-mode").click();
     assert.equal(await page.locator(".top").evaluate(element => getComputedStyle(element).display), "none");
     assert.ok(await page.locator("#exit-presentation").isVisible());
+    await page.waitForFunction(() => document.activeElement?.id === "exit-presentation");
+    assert.equal(await page.locator(".w-actions").first().isVisible(), false);
+    assert.equal(await page.locator("#data-health-btn").isVisible(), false);
     await page.locator("#exit-presentation").click();
+    await page.waitForFunction(() => document.activeElement?.id === "presentation-mode");
 
     await page.reload({ waitUntil: "networkidle" });
     await page.getByText("Segment Workbench").first().click();
@@ -994,6 +1047,18 @@ test("local dashboards replace data against the same recipe and report schema dr
     assert.match(text, /vs previous dataset/i);
     assert.equal(cookCalls, 1);
     assert.equal(await page.locator("#refresh-btn").isEnabled(), false);
+
+    await page.locator("#open-workbench").click();
+    const workbench = page.locator("#analysis-workbench");
+    await workbench.locator("#focus-filter-form select[name=column]").selectOption("segment");
+    await workbench.locator("#focus-filter-form select[name=operator]").selectOption("equals");
+    await workbench.locator("#focus-filter-form input[name=value]").fill("enterprise");
+    await workbench.locator("#focus-filter-form button[type=submit]").click();
+    await workbench.locator(".dialog-close").click();
+    assert.equal(await page.locator(".dataset-delta").count(), 0);
+    await page.locator("#open-brief").click();
+    assert.doesNotMatch(await page.locator("#executive-brief-dialog").innerText(), /from the previous dataset/i);
+    await page.locator("#executive-brief-dialog .dialog-close").click();
 
     await page.reload({ waitUntil: "networkidle" });
     await page.getByText("Segment Revenue").first().click();

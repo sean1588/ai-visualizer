@@ -460,6 +460,9 @@
   .workbench-form { display: grid; grid-template-columns: 1.4fr 1fr 1.2fr auto; gap: 8px; align-items: end; padding: 12px; border: 1px solid var(--rule-soft); background: var(--bg-soft); }
   .workbench-form label { display: grid; gap: 4px; }
   .workbench-form label span { font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-mute); }
+  .workbench-field { display: grid; gap: 5px; }
+  .workbench-field > span, .saved-view-panel form label > span { font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-mute); }
+  .saved-view-panel form label { display: grid; flex: 1; gap: 4px; }
   .workbench-form select, .workbench-form input, .saved-view-panel input, .notes-backup-grid textarea { width: 100%; min-width: 0; padding: 8px; border: 1px solid var(--rule-soft); background: var(--bg-elev); color: var(--fg); font: 12px var(--font-body); }
   .active-filter-list { display: flex; gap: 7px; flex-wrap: wrap; }
   .active-filter-list p { width: 100%; }
@@ -476,7 +479,7 @@
   .goal-list { display: grid; gap: 7px; }
   .goal-list > p { padding: 18px; border: 1px dashed var(--rule-soft); }
   .goal-list article { display: grid; grid-template-columns: 80px 1fr auto; align-items: center; gap: 10px; padding: 11px; border: 1px solid var(--rule-soft); background: var(--bg-elev); }
-  .goal-list article > span { font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--accent-3); }
+  .goal-list article > span { font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg); }
   .goal-list article.met > span { color: var(--accent-2); }
   .goal-list article div { display: grid; }
   .goal-list article small { color: var(--fg-mute); }
@@ -492,7 +495,7 @@
   #privacy-finding-list .credential span { color: var(--accent); }
   #correlation-list, #follow-up-list, #privacy-finding-list { display: grid; gap: 6px; }
   #correlation-list > div { display: flex; justify-content: space-between; gap: 10px; padding: 8px; border-left: 3px solid var(--accent-3); background: var(--bg-soft); }
-  #correlation-list span { font-family: var(--font-mono); font-size: 10px; color: var(--accent-3); }
+  #correlation-list span { font-family: var(--font-mono); font-size: 10px; color: var(--fg-mute); }
   #follow-up-list button { display: grid; gap: 3px; padding: 9px; border: 1px solid var(--rule-soft); background: var(--bg); color: var(--fg); text-align: left; cursor: pointer; }
   #follow-up-list button:hover { border-color: var(--accent); }
   #follow-up-list small { color: var(--fg-mute); }
@@ -500,8 +503,14 @@
   .notes-backup-grid article { display: grid; gap: 10px; align-content: start; padding: 16px; border: 1px solid var(--rule-soft); background: var(--bg-elev); }
   .notes-backup-grid textarea { min-height: 180px; resize: vertical; line-height: 1.5; }
   .notes-backup-grid article > .btn { width: max-content; }
+  .backup-preview { display: grid; gap: 5px; padding: 11px; border: 1px solid var(--accent-2); background: var(--bg-soft); }
+  .backup-preview span { color: var(--fg-mute); font-size: 11px; }
+  .backup-preview .btn { width: max-content; margin-top: 4px; }
+  .focus-empty { display: grid; place-items: center; gap: 8px; margin: 22px 32px 60px; padding: 60px 20px; border: 1px dashed var(--rule); background: var(--bg-elev); text-align: center; }
+  .focus-empty strong { font-family: var(--font-display); font-style: italic; font-size: 24px; }
+  .focus-empty span { max-width: 52ch; color: var(--fg-mute); }
   .presentation-exit { position: fixed; top: 14px; right: 16px; z-index: 80; box-shadow: 3px 3px 0 var(--rule); }
-  body.presentation-mode .top, body.presentation-mode .dash-share-actions, body.presentation-mode .recipe-history, body.presentation-mode .recurring-report, body.presentation-mode .chef-fab, body.presentation-mode .chef-panel { display: none !important; }
+  body.presentation-mode .top, body.presentation-mode .dash-share-actions, body.presentation-mode .recipe-history, body.presentation-mode .recurring-report, body.presentation-mode .chef-fab, body.presentation-mode .chef-panel, body.presentation-mode .w-actions, body.presentation-mode .table-toolbar, body.presentation-mode #data-health-btn, body.presentation-mode .focus-summary button, body.presentation-mode .focus-empty button { display: none !important; }
   body.presentation-mode .dash-head { padding: 34px 40px 20px; }
   body.presentation-mode .dash-grid { padding: 22px 40px 50px; }
   @media (max-width: 980px) {
@@ -664,7 +673,7 @@ button.recent-card { width: 100%; color: inherit; text-align: left; font: inheri
 [data-fp].is-changed > .w { animation: wPulse 1.6s ease-out 1; }
 
 @media (pointer: coarse) {
-  .btn, .widget-action, .assumption-chip, .widget-rationale > summary, .widget-edit > summary, .legend-button, .statlist-key, .recent-card, .example-open, .dialog-close { min-height: 44px; }
+  .btn, .widget-action, .assumption-chip, .widget-rationale > summary, .widget-edit > summary, .legend-button, .statlist-key, .recent-card, .example-open, .dialog-close, .workbench-tabs button, .active-filter-list button, .workbench-form input, .workbench-form select, .saved-view-panel input, #saved-view-list article > button, .goal-list article > button { min-height: 44px; }
 }
 
 @media (max-width: 640px) {

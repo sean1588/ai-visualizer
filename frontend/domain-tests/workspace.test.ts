@@ -40,3 +40,36 @@ test('dashboard backup parser rejects unrelated JSON', () => {
   assert.throws(() => parseDashboardBundle('{"rows":[]}'), /not a supported Mise dashboard backup/);
   assert.throws(() => parseDashboardBundle('{nope'), /not valid JSON/);
 });
+
+test('dashboard backup parser reconstructs nested state and disables imported refresh', () => {
+  const source = JSON.stringify({
+    kind: 'mise-dashboard-bundle',
+    version: 1,
+    dashboard: {
+      id: 'unsafe',
+      title: 'Imported',
+      rows: [{ amount: 1 }],
+      recipe: { title: 'Imported', widgets: [{ type: 'table', span: 12, title: 'Rows', limit: 10 }] },
+      dataSource: { type: 'http', url: 'https://example.com/data.json', refreshMinutes: 5 },
+      filters: 'not-an-array',
+      savedViews: [{ id: 'bad', name: 'Broken', filters: [{ operator: 'contains', value: null }] }],
+      kpiGoals: [{ target: 'lots' }],
+      alerts: [{ threshold: 'high' }],
+      dashboardNotes: 42,
+      theme: 'unknown',
+      savedAt: 1,
+    },
+  });
+  const restored = parseDashboardBundle(source);
+  assert.deepEqual(restored.filters, []);
+  assert.deepEqual(restored.savedViews?.[0].filters, []);
+  assert.deepEqual(restored.kpiGoals, []);
+  assert.deepEqual(restored.alerts, []);
+  assert.equal(restored.dashboardNotes, '');
+  assert.equal(restored.theme, 'mise');
+  assert.deepEqual(restored.dataSource, {
+    type: 'http',
+    url: 'https://example.com/data.json',
+    refreshMinutes: 0,
+  });
+});

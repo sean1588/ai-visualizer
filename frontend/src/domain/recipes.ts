@@ -104,6 +104,39 @@ export interface KpiOptions {
   schema?: readonly SchemaColumn[];
 }
 
+function kpiLastSeries(values: readonly number[], excludeOutliers = true): { values: number[]; excludedOutlier: boolean } {
+  if (!excludeOutliers || values.length < 8) return { values: [...values], excludedOutlier: false };
+  const last = values[values.length - 1];
+  const restBounds = iqrBounds(values.slice(0, -1));
+  if (!restBounds || (last >= restBounds.lo && last <= restBounds.hi)) {
+    return { values: [...values], excludedOutlier: false };
+  }
+  return { values: values.slice(0, -1), excludedOutlier: true };
+}
+
+export function computeKpiNumericFromValues(
+  values: readonly number[],
+  aggregate: KpiAggregate = 'last',
+  options: Pick<KpiOptions, 'excludeOutliers'> = {},
+): number | null {
+  if (!values.length) return null;
+  if (aggregate === 'count') return values.length;
+  if (aggregate === 'sum') return values.reduce((sum, value) => sum + value, 0);
+  if (aggregate === 'average') return values.reduce((sum, value) => sum + value, 0) / values.length;
+  const series = kpiLastSeries(values, options.excludeOutliers ?? true).values;
+  return series[series.length - 1] ?? null;
+}
+
+export function computeKpiNumeric(
+  columnName: string,
+  rows: readonly Row[],
+  schema: readonly SchemaColumn[],
+  aggregate: KpiAggregate = 'last',
+  options: Pick<KpiOptions, 'excludeOutliers'> = {},
+): number | null {
+  return computeKpiNumericFromValues(metricValues(columnName, rows, schema), aggregate, options);
+}
+
 export function computeKpiFromValues(
   values: readonly number[],
   aggregate: KpiAggregate = 'last',
@@ -131,16 +164,7 @@ export function computeKpiFromValues(
       excludedOutlier: false,
     };
   }
-  let series = [...values];
-  let excludedOutlier = false;
-  if ((options.excludeOutliers ?? true) && values.length >= 8) {
-    const last = values[values.length - 1];
-    const restBounds = iqrBounds(values.slice(0, -1));
-    if (restBounds && (last < restBounds.lo || last > restBounds.hi)) {
-      series = values.slice(0, -1);
-      excludedOutlier = true;
-    }
-  }
+  const { values: series, excludedOutlier } = kpiLastSeries(values, options.excludeOutliers ?? true);
   const last = series[series.length - 1];
   const previous = series[series.length - 2] ?? last;
   const delta = previous ? ((last - previous) / Math.abs(previous)) * 100 : 0;
