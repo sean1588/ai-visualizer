@@ -388,9 +388,9 @@ function App() {
     if (incoming.kind === 'recipe') {
       const currentPaste = pasteText.trim();
       if (currentPaste) {
-        await runPipeline(currentPaste, null, { recipe: incoming.recipe as DashboardRecipe<unknown>, notes });
+        await runPipeline(currentPaste, null, { recipe: incoming.recipe as unknown as DashboardRecipe<unknown>, notes });
       } else {
-        const recipe = incoming.recipe as DashboardRecipe<unknown>;
+        const recipe = incoming.recipe as unknown as DashboardRecipe<unknown>;
         dispatch({ type: 'patch', value: { pendingRecipe: recipe, error: `Recipe loaded: ${recipe.title || 'untitled'}. Drop or paste data to cook it — the AI will not be asked again.` } });
         flashStatus('Recipe ready — add data');
       }
@@ -523,7 +523,7 @@ function App() {
       const rows = incoming.rows;
       const schema = inferSchema(rows);
       const parseHealth = buildParseHealth(rows, schema, incoming.health);
-      const dataSource = { ...current.dataSource, url: fetched.finalUrl, contentType: fetched.contentType, fetchedAt: new Date().toISOString() };
+      const dataSource: DataSource = { ...current.dataSource, type: 'http', url: fetched.finalUrl, contentType: fetched.contentType, fetchedAt: new Date().toISOString() };
       const recipe = applyRecipeToRows(current.recipe, rows, schema, { dataSource });
       dispatch({ type: 'patch', value: { rows, schema, parseHealth, recipe, dataSource } });
       persistSnapshot({ rows, schema, recipe, dataSource, parseHealth, id: current.id });
