@@ -772,7 +772,7 @@ test("analysis workbench keeps ten browser-local enhancements cohesive and persi
     await workbench.getByRole("button", { name: "Goals" }).click();
     await workbench.locator("#kpi-goal-form input[name=target]").fill("45");
     await workbench.locator("#kpi-goal-form button[type=submit]").click();
-    assert.match(await workbench.locator("#kpi-goal-list").innerText(), /Goal met/i);
+    assert.match(await workbench.locator("#kpi-goal-list").innerText(), /Met/i);
     assert.equal(await page.locator(".w-kpi .kpi-goal.met").count(), 1);
 
     await workbench.getByRole("button", { name: "Discover" }).click();
