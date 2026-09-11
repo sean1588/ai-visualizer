@@ -281,6 +281,9 @@
   .chart-data-table table { width: 100%; border-collapse: collapse; margin-top: 8px; }
   .chart-data-table th, .chart-data-table td { padding: 6px 8px; border-bottom: 1px dashed var(--rule-soft); text-align: left; font-size: 11px; }
   .chart-data-table th { font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
+  .chart-keyboard-points { height: 0; overflow: visible; }
+  .chart-keyboard-point { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .chart-keyboard-point:focus-visible { position: relative; z-index: 5; width: auto; height: auto; clip-path: none; padding: 5px 8px; border: 1px solid var(--rule); background: var(--bg-elev); color: var(--fg); font-family: var(--font-mono); font-size: 9px; }
 
   /* table */
   .w-table table { width: 100%; border-collapse: collapse; }

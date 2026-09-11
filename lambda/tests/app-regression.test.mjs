@@ -551,8 +551,7 @@ test("charts expose summaries, data tables, keyboard inspection, and live status
     assert.match(await page.locator(".w-chart .chart-data-table table").first().getAttribute("aria-label"), /MRR Trend chart data/i);
     assert.ok(await page.locator(".w-chart .chart-data-table tbody tr").first().count());
 
-    await page.locator(".w-chart .chart-hit").first().focus();
-    await page.keyboard.press("Enter");
+    await page.locator(".w-chart .chart-keyboard-point").first().press("Enter");
     await page.waitForSelector("#inspector-dialog[open]");
     await page.waitForFunction(() => document.activeElement?.id === "inspector-search");
   });

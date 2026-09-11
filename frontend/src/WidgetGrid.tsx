@@ -174,6 +174,26 @@ function ChartDataTable({
   );
 }
 
+function ChartKeyboardPoints({
+  title,
+  points,
+  onInspect,
+}: {
+  title: string;
+  points: Array<{ label: string; value: unknown }>;
+  onInspect: (value: unknown) => void;
+}) {
+  return (
+    <div className="chart-keyboard-points" aria-label={`${title} interactive points`}>
+      {points.map((point, index) => (
+        <button className="chart-keyboard-point" type="button" key={`${point.label}-${index}`} onClick={() => onInspect(point.value)}>
+          Inspect {point.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function KpiCard({
   widget,
   index,
@@ -310,17 +330,12 @@ function DonutCard({
               <path
                 key={item.key}
                 className="chart-hit"
-                role="button"
-                tabIndex={0}
                 data-inspect-widget={widgetFingerprint(widget)}
                 data-inspect-value={encodeURIComponent(item.key)}
                 d={path}
                 fill={colors[dataIndex % colors.length]}
                 opacity="0.9"
                 onClick={() => onInspect(widget, item.key)}
-                onKeyDown={event => {
-                  if (event.key === 'Enter' || event.key === ' ') onInspect(widget, item.key);
-                }}
               >
                 <title>{item.key}: {String(formatFull(item.value, widget.metric, widget.format, { rows, schema }))}</title>
               </path>
@@ -445,8 +460,6 @@ function CountBarCard({
             <rect
               key={item.key}
               className="chart-hit"
-              role="button"
-              tabIndex={0}
               data-inspect-widget={widgetFingerprint(widget)}
               data-inspect-value={encodeURIComponent(item.key)}
               x={x}
@@ -456,9 +469,6 @@ function CountBarCard({
               fill="var(--accent-2)"
               opacity="0.85"
               onClick={() => onInspect(widget, item.key)}
-              onKeyDown={event => {
-                if (event.key === 'Enter' || event.key === ' ') onInspect(widget, item.key);
-              }}
             >
               <title>{item.key}: {item.value.toLocaleString()} rows</title>
             </rect>
@@ -466,6 +476,7 @@ function CountBarCard({
         })}
         {data.map((item, dataIndex) => <text key={item.key} className="axis-tick" x={paddingLeft + dataIndex * barWidth + barWidth / 2} y={height - 12} textAnchor="middle">{item.key.slice(0, 10)}</text>)}
       </svg>
+      <ChartKeyboardPoints title={widget.title} points={data.map(item => ({ label: `${item.key}: ${item.value} rows`, value: item.key }))} onInspect={value => onInspect(widget, value)} />
       <ChartDataTable title={widget.title} columns={[humanize(widget.cat), 'Rows']} rows={data.map(item => [item.key, item.value])} />
     </div>
   );
@@ -534,8 +545,6 @@ function SeriesCard({
               <circle
                 key={`${String(item.x)}-${dataIndex}`}
                 className="chart-hit"
-                role="button"
-                tabIndex={0}
                 data-inspect-widget={widgetFingerprint(widget)}
                 data-inspect-value={encodeURIComponent(String(item.x))}
                 cx={xAt(dataIndex)}
@@ -545,9 +554,6 @@ function SeriesCard({
                 stroke="var(--accent)"
                 strokeWidth="1.25"
                 onClick={() => onInspect(widget, item.x)}
-                onKeyDown={event => {
-                  if (event.key === 'Enter' || event.key === ' ') onInspect(widget, item.x);
-                }}
               >
                 <title>{String(item.x)}: {String(formatFull(item.y, widget.y, widget.format, { rows, schema }))}</title>
               </circle>
@@ -559,8 +565,6 @@ function SeriesCard({
             <rect
               key={`${String(item.x)}-${dataIndex}`}
               className="chart-hit"
-              role="button"
-              tabIndex={0}
               data-inspect-widget={widgetFingerprint(widget)}
               data-inspect-value={encodeURIComponent(String(item.x))}
               x={paddingLeft + dataIndex * xStep + xStep * 0.15}
@@ -570,9 +574,6 @@ function SeriesCard({
               fill={color}
               opacity="0.85"
               onClick={() => onInspect(widget, item.x)}
-              onKeyDown={event => {
-                if (event.key === 'Enter' || event.key === ' ') onInspect(widget, item.x);
-              }}
             >
               <title>{String(item.x)}: {String(formatFull(item.y, widget.y, widget.format, { rows, schema }))}</title>
             </rect>
@@ -583,6 +584,14 @@ function SeriesCard({
           return <text key={`${String(item.x)}-${dataIndex}`} className="axis-tick" x={xAt(dataIndex)} y={height - 10} textAnchor="middle">{String(item.x).slice(0, 7)}</text>;
         })}
       </svg>
+      <ChartKeyboardPoints
+        title={widget.title}
+        points={data.map(item => ({
+          label: `${String(item.x)}: ${String(formatFull(item.y, widget.y, widget.format, { rows, schema }))}`,
+          value: item.x,
+        }))}
+        onInspect={value => onInspect(widget, value)}
+      />
       <ChartDataTable
         title={widget.title}
         columns={[humanize(widget.x), humanize(widget.y)]}
