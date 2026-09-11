@@ -264,10 +264,10 @@ test("completed-plate gallery teaches prompts and direct edits share undo histor
     await page.waitForSelector("#chef-fab.is-visible");
     assert.equal(requests.length, 0);
 
-    await page.locator(".widget-rationale summary").first().click();
-    assert.match(await page.locator(".widget-rationale p").first().innerText(), /recurring revenue is the primary operating metric/i);
+    await page.locator(".w-kpi .widget-rationale summary").first().click();
+    assert.match(await page.locator(".w-kpi .widget-rationale p").first().innerText(), /recurring revenue is the primary operating metric/i);
 
-    await page.locator(".widget-edit summary").first().click();
+    await page.locator(".w-kpi .widget-edit summary").first().click();
     await page.getByRole("button", { name: "Move later" }).first().click();
     assert.equal(await page.locator(".w-kpi .label").first().innerText(), "NEW CUSTOMERS");
     assert.match(await page.locator(".recipe-history").innerText(), /2 revisions/i);
@@ -277,26 +277,26 @@ test("completed-plate gallery teaches prompts and direct edits share undo histor
     await page.locator("#recipe-redo").click();
     assert.equal(await page.locator(".w-kpi .label").first().innerText(), "NEW CUSTOMERS");
 
-    await page.locator(".widget-edit summary").first().click();
+    await page.locator(".w-kpi .widget-edit summary").first().click();
     await page.getByRole("button", { name: /Resize · 3\/12/ }).first().click();
     assert.equal(await page.locator(".w-kpi").first().evaluate(element => element.style.gridColumn), "span 4");
 
     const widgetCount = await page.locator("#dash-grid > [data-fp]").count();
-    await page.locator(".widget-edit summary").first().click();
+    await page.locator(".w-kpi .widget-edit summary").first().click();
     await page.getByRole("button", { name: "Duplicate" }).first().click();
     assert.equal(await page.locator("#dash-grid > [data-fp]").count(), widgetCount + 1);
-    await page.locator(".widget-edit summary").first().click();
+    await page.locator(".w-kpi .widget-edit summary").first().click();
     await page.getByRole("button", { name: "Remove" }).first().click();
     assert.equal(await page.locator("#dash-grid > [data-fp]").count(), widgetCount);
 
-    await page.locator(".widget-edit summary").first().click();
+    await page.locator(".w-kpi .widget-edit summary").first().click();
     await page.getByRole("button", { name: "Ask the Chef" }).first().click();
     assert.match(await page.locator("#chef-target").innerText(), /Editing/i);
     await page.locator("#chef-input").fill("Make this widget full width");
     await page.locator("#chef-send").click();
     await page.waitForFunction(() => document.querySelector("#chef-msgs")?.innerText.includes("Trimmed"));
     assert.equal(requests.length, 1);
-    assert.match(requests[0].prompt, /<TARGET_WIDGET>[\s\S]*"index": 0/);
+    assert.match(requests[0].prompt, /<TARGET_WIDGET>[\s\S]*"index": 1/);
     assert.match(requests[0].prompt, /Make this widget full width/);
   });
 });

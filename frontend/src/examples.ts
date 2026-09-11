@@ -24,6 +24,7 @@ export const EXAMPLE_PLATES: ExamplePlate[] = [
     recipe: {
       title: 'SaaS Growth Review',
       widgets: [
+        { type: 'observations', span: 12, title: 'What stood out', rationale: 'A short evidence-backed brief makes the operating story scannable.', observations: ['MRR reaches $102.4k in December after rising throughout the year.', 'New customers finish at 184 while NPS improves to 61.', 'Churn reaches its yearly high of 22 in December.'] },
         { type: 'kpi', span: 3, title: 'Current MRR', rationale: 'The latest recurring revenue is the primary operating metric.', fields: { metric: 'mrr', aggregate: 'last', format: 'currency' } },
         { type: 'kpi', span: 3, title: 'New Customers', rationale: 'Acquisition volume explains part of recurring revenue growth.', fields: { metric: 'new_customers', aggregate: 'last', format: 'number' } },
         { type: 'kpi', span: 3, title: 'Churn', rationale: 'Latest churn is paired with growth to expose retention risk.', fields: { metric: 'churn', aggregate: 'last', format: 'number' } },

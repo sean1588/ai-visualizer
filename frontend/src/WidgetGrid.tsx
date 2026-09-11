@@ -1,4 +1,4 @@
-import { createContext, useContext } from 'react';
+import { createContext, useContext, type MouseEvent } from 'react';
 
 import {
   aggregateBy,
@@ -88,6 +88,10 @@ function WidgetActions({
 }) {
   const assumptions = assumptionText(widget);
   const editor = useContext(WidgetEditorContext);
+  const edit = (action: WidgetEditAction, event: MouseEvent<HTMLButtonElement>) => {
+    event.currentTarget.closest('details')?.removeAttribute('open');
+    editor?.onEdit(index, action);
+  };
   return (
     <div className="w-actions">
       {meta && <span className="meta">{meta}</span>}
@@ -117,12 +121,12 @@ function WidgetActions({
         <details className="widget-edit">
           <summary>Edit</summary>
           <div className="widget-edit-menu">
-            <button type="button" disabled={index === 0} onClick={() => editor.onEdit(index, 'move-up')}>Move earlier</button>
-            <button type="button" disabled={index === editor.count - 1} onClick={() => editor.onEdit(index, 'move-down')}>Move later</button>
-            <button type="button" disabled={widget.type === 'table' || widget.type === 'observations'} onClick={() => editor.onEdit(index, 'resize')}>Resize · {widget.span}/12</button>
-            <button type="button" onClick={() => editor.onEdit(index, 'duplicate')}>Duplicate</button>
-            <button type="button" disabled={editor.count === 1} onClick={() => editor.onEdit(index, 'remove')}>Remove</button>
-            <button type="button" onClick={() => editor.onChef(index)}>Ask the Chef</button>
+            <button type="button" disabled={index === 0} onClick={event => edit('move-up', event)}>Move earlier</button>
+            <button type="button" disabled={index === editor.count - 1} onClick={event => edit('move-down', event)}>Move later</button>
+            <button type="button" disabled={widget.type === 'table' || widget.type === 'observations'} onClick={event => edit('resize', event)}>Resize · {widget.span}/12</button>
+            <button type="button" onClick={event => edit('duplicate', event)}>Duplicate</button>
+            <button type="button" disabled={editor.count === 1} onClick={event => edit('remove', event)}>Remove</button>
+            <button type="button" onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); editor.onChef(index); }}>Ask the Chef</button>
           </div>
         </details>
       )}
