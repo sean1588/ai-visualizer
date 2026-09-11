@@ -122,7 +122,7 @@ to the current browser-local architecture:
 - Background refresh and server-side alerting.
 - Workspaces, permissions, audit logs, SSO, and compliance controls.
 
-## Engineering foundation
+## Completed engineering foundation
 
 ### Correctness and evaluation
 
@@ -136,8 +136,7 @@ to the current browser-local architecture:
 - Continue extracting feature components when the concepts have independent
   state or behavior; avoid wrappers that only reduce line count.
 - Keep direct controls and AI edits on one canonical recipe contract.
-- Move larger saved rows from `localStorage` to IndexedDB when quota failures
-  become observable.
+- Keep IndexedDB migration gated on observable local-storage quota failures.
 
 ### Security and resilience
 
@@ -156,9 +155,9 @@ to the current browser-local architecture:
 
 ### Product learning
 
-Add minimal first-party events that contain no row data, field names, URLs, or
-free text. Measure the ingest-to-render funnel, fallback rate, assumption edits,
-chart inspection, Chef use, recurring refresh, and export type.
+Minimal first-party events contain no row data, field names, URLs, or free text.
+They measure the ingest-to-render funnel, fallback rate, assumption edits, chart
+inspection, Chef use, recurring refresh, and export type.
 
 ## Explicitly deferred
 

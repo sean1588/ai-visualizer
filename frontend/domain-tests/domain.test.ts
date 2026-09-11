@@ -229,6 +229,7 @@ test('planner recipe parsing validates fields, computes KPIs, and moves one tabl
   assert.ok(recipe);
   assert.equal(recipe.title, 'Revenue view');
   assert.deepEqual(recipe.widgets.map(widget => widget.type), ['observations', 'kpi', 'line', 'table']);
+  assert.equal(recipe.rejectedWidgets, 1);
   assert.equal(recipe.widgets[1].span, 3);
   assert.equal(recipe.widgets[3].type === 'table' && recipe.widgets[3].sort, 'revenue');
 });

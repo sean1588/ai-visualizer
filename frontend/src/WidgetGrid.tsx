@@ -152,6 +152,28 @@ function Sparkline({ values }: { values: number[] }) {
   );
 }
 
+function ChartDataTable({
+  title,
+  columns,
+  rows,
+}: {
+  title: string;
+  columns: string[];
+  rows: Array<Array<string | number>>;
+}) {
+  return (
+    <details className="chart-data-table">
+      <summary>View chart data</summary>
+      <div className="table-scroll">
+        <table aria-label={`${title} chart data`}>
+          <thead><tr>{columns.map(column => <th key={column}>{column}</th>)}</tr></thead>
+          <tbody>{rows.map((row, index) => <tr key={index}>{row.map((value, valueIndex) => <td key={valueIndex}>{value}</td>)}</tr>)}</tbody>
+        </table>
+      </div>
+    </details>
+  );
+}
+
 function KpiCard({
   widget,
   index,
@@ -268,7 +290,7 @@ function DonutCard({
         />
       </div>
       <div className="donut-body">
-        <svg viewBox="0 0 180 180" width="180" height="180">
+        <svg viewBox="0 0 180 180" width="180" height="180" role="group" aria-label={`${widget.title}. ${data.length} categories totaling ${String(formatFull(total, widget.metric, widget.format, { rows, schema }))}.`}>
           {data.map((item, dataIndex) => {
             const fraction = item.value / total;
             const start = accumulated * Math.PI * 2 - Math.PI / 2;
@@ -328,6 +350,15 @@ function DonutCard({
           ))}
         </ul>
       </div>
+      <ChartDataTable
+        title={widget.title}
+        columns={[humanize(widget.cat), humanize(widget.metric), 'Share']}
+        rows={data.map(item => [
+          item.key,
+          String(formatFull(item.value, widget.metric, widget.format, { rows, schema })),
+          `${(item.value / total * 100).toFixed(1)}%`,
+        ])}
+      />
     </div>
   );
 }
@@ -401,7 +432,7 @@ function CountBarCard({
         <h3>{widget.title}</h3>
         <WidgetActions widget={widget} index={index} meta={`count · ${data.length}`} onAssumptions={onAssumptions} onInspect={onInspect} />
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="group" aria-label={`${widget.title}. Counts for ${data.length} categories.`}>
         {Array.from({ length: 4 }, (_, tick) => {
           const value = maximum * (tick / 3);
           const y = yScale(value);
@@ -435,6 +466,7 @@ function CountBarCard({
         })}
         {data.map((item, dataIndex) => <text key={item.key} className="axis-tick" x={paddingLeft + dataIndex * barWidth + barWidth / 2} y={height - 12} textAnchor="middle">{item.key.slice(0, 10)}</text>)}
       </svg>
+      <ChartDataTable title={widget.title} columns={[humanize(widget.cat), 'Rows']} rows={data.map(item => [item.key, item.value])} />
     </div>
   );
 }
@@ -487,7 +519,7 @@ function SeriesCard({
         <h3>{widget.title}</h3>
         <WidgetActions widget={widget} index={index} meta={meta} onAssumptions={onAssumptions} onInspect={onInspect} />
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className={widget.span >= 12 ? 'tall' : ''}>
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className={widget.span >= 12 ? 'tall' : ''} role="group" aria-label={`${widget.title}. ${data.length} ${widget.type === 'line' ? 'points' : 'bars'} from ${String(data[0].x)} to ${String(data[data.length - 1].x)}.`}>
         {Array.from({ length: widget.type === 'line' ? 5 : 4 }, (_, tick) => {
           const denominator = widget.type === 'line' ? 4 : 3;
           const value = minimum + (maximum - minimum) * (tick / denominator);
@@ -551,6 +583,11 @@ function SeriesCard({
           return <text key={`${String(item.x)}-${dataIndex}`} className="axis-tick" x={xAt(dataIndex)} y={height - 10} textAnchor="middle">{String(item.x).slice(0, 7)}</text>;
         })}
       </svg>
+      <ChartDataTable
+        title={widget.title}
+        columns={[humanize(widget.x), humanize(widget.y)]}
+        rows={data.map(item => [String(item.x), String(formatFull(item.y, widget.y, widget.format, { rows, schema }))])}
+      />
     </div>
   );
 }
@@ -644,6 +681,12 @@ export default function WidgetGrid({
           <span className="banner-eyebrow">⚠ Couldn’t reach the AI</span>
           <span className="banner-msg">Showing a default layout based on your schema. Notes were kept — try again for an AI-designed dashboard.</span>
           <button type="button" className="btn btn-ghost retry-ai-btn" id="retry-ai-btn" onClick={onRetry}>Try again</button>
+        </div>
+      )}
+      {!!recipe.rejectedWidgets && (
+        <div id="rejected-widgets-banner" className="w w-banner w-banner-rejected" style={{ gridColumn: 'span 12' }}>
+          <span className="banner-eyebrow">Recipe repaired</span>
+          <span className="banner-msg">{recipe.rejectedWidgets} invalid model widget{recipe.rejectedWidgets === 1 ? ' was' : 's were'} rejected. The remaining dashboard uses only fields supported by this dataset.</span>
         </div>
       )}
       {recipe.widgets.map((widget, index) => {

@@ -136,7 +136,7 @@ If a user shows up on IE11 or an old Android Browser, they get a polite "please 
 
 - **localStorage** for plates (saved dashboards); Chef history is session-only
 - Key: `mise.recents.v1` for plates, scoped by version so future schema changes don't corrupt old data
-- **No IndexedDB** in v1 — localStorage's 5-10MB limit handles ~12 plates of typical size. Migrate when we hit complaints (see followups Tier 4).
+- **No IndexedDB yet** — localStorage's 5-10MB limit handles ~12 plates of typical size. The named debt is large-plate quota pressure; migrate rows to IndexedDB when quota failures become observable rather than adding a second persistence system speculatively.
 - **No cookies, no sessionStorage, no service workers.** Privacy story stays simple: *"data lives in this browser tab."*
 
 ---
@@ -145,7 +145,9 @@ If a user shows up on IE11 or an old Android Browser, they get a polite "please 
 
 - The LLM proxy never logs prompt content beyond hashed token counts (for billing reconciliation)
 - CORS on the proxy: only `app.mise.app` origin allowed in production
-- CSP header on the app: tight allowlist, no `unsafe-inline` (move all inline `<script>` to external files for the production build)
+- CSP headers allow scripts only from Mise and restrict connections to the same origin. Styles temporarily retain `unsafe-inline` because widget spans and chart geometry use React style properties; removing that debt requires moving dynamic geometry to classes or SVG attributes without breaking rendering.
+- Remote-data fetches resolve and reject private/reserved addresses at every redirect. A DynamoDB counter provides shared production rate limiting, with the in-memory limiter retained for local development.
+- Product telemetry accepts only named events and enum-like metadata. Rows, field names, URLs, Notes, and Chef text are rejected by the client/server contract.
 - Sample data must not include any PII or anything resembling real customer data
 
 ---

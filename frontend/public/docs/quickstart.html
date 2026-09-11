@@ -16,9 +16,11 @@
       <li>Optional notes nudge the layout. They are guidance, not commands.</li>
       <li>Render. A complete-data profile is computed locally. Aggregate facts are sent once for layout; raw rows are not.</li>
       <li>Ask The Chef to edit. Transforms (sort, limit) show as chips — they are not magic.</li>
-      <li>Export a PNG, the recipe JSON, or table CSV / Markdown. Saves stay in this browser.</li>
+      <li>Inspect data health, widget rationale, supporting rows, or the complete recipe before sharing a claim.</li>
+      <li>Export a PNG, recipe JSON, table CSV / Markdown, or a self-contained interactive HTML file. Recipe links contain layout only.</li>
     </ol>
-    <p>Recipes can be dropped back onto the plate and run against new data without asking the model again.</p>
+    <p>Recipes can be dropped back onto the plate and run against new data without asking the model again. Saved HTTP dashboards can refresh while open, compare snapshots, and evaluate local thresholds.</p>
+    <p>Mise records small first-party product events such as “dashboard rendered” and export type. Events never contain rows, field names, URLs, notes, or Chef text. Set <code>mise.telemetry.disabled</code> to <code>1</code> in local storage to opt out.</p>
   </main>
 </body>
 </html>

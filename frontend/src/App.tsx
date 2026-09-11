@@ -61,6 +61,7 @@ import { complete, fetchRemoteData } from './services';
 import { buildRecipeLink, buildStandaloneHtml, decodeRecipeFragment } from './sharing';
 import { appReducer, createInitialState, initialSteps, type AppState, type ChefMessage, type LoadingStep, type RecipeRevision } from './state';
 import { clearRecents, loadRecents, migrateLegacyStorage, relativeTime, saveRecent, type RecentDashboard } from './storage';
+import { track } from './telemetry';
 import WidgetGrid from './WidgetGrid';
 
 declare global {
@@ -298,7 +299,10 @@ function AssumptionsDialog({
   const widget = index === null ? null : state.recipe?.widgets[index] || null;
   useEffect(() => {
     const dialog = dialogRef.current;
-    if (widget && dialog && !dialog.open) dialog.showModal();
+    if (widget && dialog && !dialog.open) {
+      dialog.showModal();
+      window.setTimeout(() => dialog.querySelector<HTMLElement>('select,input')?.focus(), 0);
+    }
   }, [widget]);
   if (!widget) return null;
   const numeric = state.schema.filter(column => column.type === 'number' && !/^(lat|latitude|lon|lng|long|longitude)$/i.test(column.name));
@@ -411,6 +415,7 @@ function InspectorDialog({ state, onClose }: { state: AppState; onClose: () => v
       setSort(null);
       setOrder('asc');
       dialog.showModal();
+      window.setTimeout(() => dialog.querySelector<HTMLElement>('#inspector-search')?.focus(), 0);
     }
   }, [inspector]);
   const filteredRows = useMemo(() => {
@@ -583,7 +588,7 @@ function App() {
   const runPipeline = useCallback(async (
     rawText: string,
     dataSource: DataSource | null = null,
-    options: { recipe?: DashboardRecipe<unknown>; notes?: string } = {},
+    options: { recipe?: DashboardRecipe<unknown>; notes?: string; source?: 'file' | 'paste' | 'http' | 'example' | 'recipe' } = {},
   ) => {
     let incoming;
     try {
@@ -604,6 +609,8 @@ function App() {
       return;
     }
     const rows = incoming.rows;
+    const ingestSource = options.source || (dataSource?.type === 'http' ? 'http' : options.recipe ? 'recipe' : 'paste');
+    track('ingest_started', { source: ingestSource });
     dispatch({
       type: 'patch',
       value: {
@@ -664,6 +671,7 @@ function App() {
       },
     });
     persistSnapshot({ rows, schema, recipe, dataSource, parseHealth, schemaOverrides, dataAudit, previousSnapshot: null, updatedAt });
+    track('dashboard_rendered', { source: ingestSource, fallback: !!recipe.fallback, widgets: recipe.widgets.length });
   }, [flashStatus, notes, pasteText, persistSnapshot]);
 
   const openExample = useCallback((example: ExamplePlate) => {
@@ -671,7 +679,7 @@ function App() {
     setPasteText(text);
     setNotes(example.noteExample);
     dispatch({ type: 'patch', value: { title: example.title } });
-    void runPipeline(text, null, { recipe: example.recipe, notes: example.noteExample });
+    void runPipeline(text, null, { recipe: example.recipe, notes: example.noteExample, source: 'example' });
   }, [runPipeline]);
 
   const useExampleNote = useCallback((note: string) => {
@@ -693,7 +701,7 @@ function App() {
       if (incoming?.kind === 'recipe') void runPipeline(text);
       else {
         setPasteText(text);
-        void runPipeline(text);
+        void runPipeline(text, null, { source: 'file' });
       }
     };
     reader.onerror = () => dispatch({ type: 'patch', value: { error: 'Could not read that file.' } });
@@ -849,6 +857,7 @@ function App() {
         lastError: null,
       };
       const result = applyDataUpdate(fetched.text, dataSource);
+      track('recurring_refresh', { result: 'success', triggered: result.triggeredAlerts > 0 });
       flashStatus(result.triggeredAlerts ? `${result.triggeredAlerts} threshold alert${result.triggeredAlerts === 1 ? '' : 's'} triggered` : `Refreshed ${result.rowCount} rows`, result.triggeredAlerts > 0);
     } catch (error) {
       console.warn('[refresh] failed', error);
@@ -871,6 +880,7 @@ function App() {
         updatedAt: latest.updatedAt || Date.now(),
         id: latest.id,
       });
+      track('recurring_refresh', { result: 'error', triggered: false });
       flashStatus('Refresh failed', true);
     } finally {
       refreshInFlight.current = false;
@@ -938,6 +948,7 @@ function App() {
         generatedAt: new Date().toISOString(),
       });
       downloadFile(exportFilename(current.recipe.title, 'recipe.json'), new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+      track('export_created', { type: 'recipe' });
       flashStatus('Recipe exported');
     } catch (error) {
       flashStatus(error instanceof Error ? error.message : 'Recipe export failed', true);
@@ -957,6 +968,7 @@ function App() {
       });
       const link = buildRecipeLink(`${window.location.origin}${window.location.pathname}`, payload);
       await navigator.clipboard.writeText(link);
+      track('export_created', { type: 'link' });
       flashStatus('Recipe link copied');
     } catch (error) {
       flashStatus(error instanceof Error ? error.message : 'Could not copy recipe link', true);
@@ -984,6 +996,7 @@ function App() {
         theme: current.theme,
       });
       downloadFile(exportFilename(current.recipe.title, 'html'), new Blob([html], { type: 'text/html;charset=utf-8' }));
+      track('export_created', { type: 'html' });
       flashStatus('Interactive HTML exported');
     } catch (error) {
       flashStatus(error instanceof Error ? error.message : 'HTML export failed', true);
@@ -1009,6 +1022,7 @@ function App() {
         canvas.toBlob(value => value ? resolve(value) : reject(new Error('PNG encode failed')), 'image/png');
       });
       downloadFile(exportFilename(current.recipe.title, 'png'), blob);
+      track('export_created', { type: 'png' });
       flashStatus('PNG exported');
     } catch (error) {
       console.warn('[export] PNG export failed', error);
@@ -1022,6 +1036,7 @@ function App() {
     const header = current.schema.map(column => csvEscape(column.name)).join(',');
     const body = rows.map(row => current.schema.map(column => csvEscape(row[column.name])).join(',')).join('\n');
     downloadFile(exportFilename('table', 'csv'), new Blob([`${header}\n${body}\n`], { type: 'text/csv;charset=utf-8' }));
+    track('export_created', { type: 'csv' });
     flashStatus('CSV exported');
   }, [flashStatus]);
 
@@ -1036,6 +1051,7 @@ function App() {
     }).join(' | ')} |`).join('\n');
     try {
       await navigator.clipboard.writeText([header, separator, body].join('\n'));
+      track('export_created', { type: 'markdown' });
       flashStatus('Copied markdown');
     } catch {
       flashStatus('Copy failed', true);
@@ -1048,6 +1064,7 @@ function App() {
     if (!current.recipe || index === null) return;
     const recipe = { ...current.recipe, widgets: current.recipe.widgets.map((candidate, candidateIndex) => candidateIndex === index ? widget : candidate) };
     commitRecipeChange(recipe, `Updated ${widget.title || ('label' in widget ? widget.label : humanize(widget.type))}`, { assumptionsWidgetIndex: null });
+    track('assumption_edited', { widgetType: widget.type });
     flashStatus('Assumptions updated');
   }, [commitRecipeChange, flashStatus]);
 
@@ -1087,6 +1104,7 @@ function App() {
     }
     const recipe = { ...current.recipe, widgets };
     commitRecipeChange(recipe, label, { changedWidgets: new Set(widgets.map(widgetFingerprint)) });
+    track('direct_edit', { action });
     window.setTimeout(() => dispatch({ type: 'patch', value: { changedWidgets: new Set() } }), 1200);
     flashStatus(label);
   }, [commitRecipeChange, flashStatus]);
@@ -1163,6 +1181,7 @@ function App() {
   const copyExecutiveBrief = useCallback(async (markdown: string) => {
     try {
       await navigator.clipboard.writeText(markdown);
+      track('export_created', { type: 'brief' });
       flashStatus('Executive brief copied');
     } catch {
       flashStatus('Could not copy brief', true);
@@ -1216,12 +1235,18 @@ function App() {
       updatedAt: current.updatedAt || Date.now(),
       id: current.id,
     });
+    track('health_action', {
+      action: correct
+        ? issue.correction === 'treat-as-date' ? 'treat-as-date' : 'include-outliers'
+        : 'acknowledge',
+    });
     flashStatus(correct ? 'Data assumption updated' : 'Health warning acknowledged');
   }, [flashStatus, persistSnapshot]);
 
   const openInspector = useCallback((widget: RenderedWidget, selectedValue: unknown | null) => {
     const current = stateRef.current;
     dispatch({ type: 'patch', value: { inspector: { widget, selectedValue, rows: contributingRows(widget, selectedValue, current.rows) } } });
+    track('chart_inspected', { widgetType: widget.type });
   }, []);
 
   const submitChef = useCallback(async (request: string) => {
@@ -1246,6 +1271,7 @@ function App() {
         title: typeof parsed.title === 'string' ? parsed.title : current.recipe.title,
         widgets: validated.widgets,
         fallback: false,
+        rejectedWidgets: Math.max(validated.dropped, repaired.length - validated.widgets.length) || undefined,
       };
       const chefMessage: ChefMessage = {
         role: 'chef',
@@ -1277,8 +1303,10 @@ function App() {
         updatedAt: current.updatedAt || Date.now(),
         id: current.id,
       });
+      track('chef_edit', { scope: current.chefWidgetIndex === null ? 'dashboard' : 'widget', success: true });
       window.setTimeout(() => dispatch({ type: 'patch', value: { changedWidgets: new Set() } }), 1700);
     } catch (error) {
+      track('chef_edit', { scope: current.chefWidgetIndex === null ? 'dashboard' : 'widget', success: false });
       dispatch({
         type: 'patch',
         value: {
@@ -1398,12 +1426,12 @@ function App() {
     <>
       <header className="top">
         <div className="top-left">
-          <button className="mark" type="button" onClick={reset}><span className="mark-dot" /><span className="mark-name">Mise</span></button>
+          <button className="mark" type="button" aria-label="Start a new Mise dashboard" onClick={reset}><span className="mark-dot" /><span className="mark-name">Mise</span></button>
           <span className="crumb-sep">/</span>
           <span id="crumb" className="crumb-active">{state.stage === 'loading' ? 'Reading…' : state.stage === 'dash' ? currentTitle : 'New dashboard'}</span>
         </div>
         <div className="top-right">
-          <span id="status-pill" className="pill"><span className={`pill-dot ${state.recipe && !state.statusError ? 'active' : ''}`} />{statusLabel(state)}</span>
+          <span id="status-pill" className="pill" role="status" aria-live="polite"><span className={`pill-dot ${state.recipe && !state.statusError ? 'active' : ''}`} />{statusLabel(state)}</span>
           <button id="replace-data-btn" className="btn btn-ghost" disabled={!state.recipe} title="Apply new CSV or JSON rows to this dashboard recipe" onClick={() => replacementInputRef.current?.click()}>Replace data</button>
           <input id="replacement-input" ref={replacementInputRef} type="file" accept=".csv,.json,.txt,application/json,text/csv,text/plain" hidden onChange={event => { const file = event.target.files?.[0]; if (file) replaceDashboardData(file); }} />
           <button id="refresh-btn" className="btn btn-ghost" disabled={!state.recipe || !hasHttpSource(state.dataSource) || state.refreshing} title="Fetch fresh rows from the saved HTTP source" onClick={() => void refreshDashboard()}>{state.refreshing ? 'Refreshing…' : 'Refresh data'}</button>
@@ -1452,7 +1480,7 @@ function App() {
             <div className="drop-actions"><button id="render-btn" className="btn btn-primary btn-lg" onClick={() => void runPipeline(pasteText)}>Render dashboard →</button></div>
             <div className="drop-meta">Profile computed locally · aggregate facts sent once for inference · raw rows stay here</div>
             {state.pendingRecipe && <div id="pending-recipe" className="pending-recipe">Recipe ready: {state.pendingRecipe.title || 'untitled'} · drop data to apply</div>}
-            {state.error && <div id="err" className="err">{state.error}</div>}
+            {state.error && <div id="err" className="err" role="alert">{state.error}</div>}
           </div>
           {state.recents.length > 0 && <div id="recent-rail" className="recent-rail">
             <div className="recent-rail-hd"><span className="eyebrow">Your plates · in this browser</span><button id="recent-clear" className="recent-rail-clear" onClick={() => { if (confirm('Clear all your plates from this browser?')) { clearRecents(); dispatch({ type: 'patch', value: { recents: [] } }); } }}>Clear all</button></div>
@@ -1470,7 +1498,7 @@ function App() {
           <h2 id="loading-title">We're getting to know your data.</h2>
           <p style={{ color: 'var(--fg-mute)', fontSize: 15, margin: '0 0 24px' }}>Profile first, layout second. We compute facts across the complete dataset, send those once, then forget them.</p>
           <div id="loading-file" className="file"><span id="loading-file-text">{state.loadingLabel}</span></div>
-          <ul className="loading-steps" id="loading-steps">{steps.map(([step, label]) => { const status = state.loadingSteps[step]; return <li key={step} className={`loading-step step-${status === 'done' ? 'done' : status === 'active' ? 'active' : 'pending'}`} data-step={step}><span className="step-mark">{status === 'done' ? '✓' : ''}</span><span className="step-name">{label}</span><span className="step-meta">{status === 'active' ? 'running…' : status}</span></li>; })}</ul>
+          <ul className="loading-steps" id="loading-steps" aria-live="polite">{steps.map(([step, label]) => { const status = state.loadingSteps[step]; return <li key={step} className={`loading-step step-${status === 'done' ? 'done' : status === 'active' ? 'active' : 'pending'}`} data-step={step}><span className="step-mark">{status === 'done' ? '✓' : ''}</span><span className="step-name">{label}</span><span className="step-meta">{status === 'active' ? 'running…' : status}</span></li>; })}</ul>
         </div><div className="loading-divider" /><div className="loading-right"><div className="schema-head"><h3>Inferred schema</h3><span id="schema-meta" className="eyebrow">{state.schema.length || '—'} columns</span></div><div id="schema-cols" className="schema-cols">{state.schema.map((column, index) => <div className="schema-col" key={column.name}><span className="schema-num">{String(index + 1).padStart(2, '0')}</span><span className="schema-name">{column.name}</span><span className="schema-type">{column.type}</span><span className="schema-stat" title={column.stat}>{column.stat}</span></div>)}</div></div></div>
       </section>
 
@@ -1533,7 +1561,7 @@ function App() {
         <div className="chef-hd"><div className="chef-hd-l"><span className="chef-hd-glyph">M</span><span className="chef-hd-name">The Chef</span>{chefTargetLabel && <span id="chef-target" className="chef-hd-tag">Editing · {chefTargetLabel}</span>}</div><button id="chef-close" className="chef-close" type="button" aria-label="Close" onClick={() => dispatch({ type: 'patch', value: { chefOpen: false, chefWidgetIndex: null } })}>×</button></div>
         <div id="chef-body" className="chef-body">
           {!state.chefHistory.length && !state.chefThinking && <div id="chef-empty" className="chef-empty"><div className="chef-empty-eyebrow">Tell the chef what to change</div><p className="chef-empty-title">"Swap the donut for a bar chart, sorted by month."</p><div className="chef-suggestions">{[['Swap the donut for a bar chart', 'Swap the donut for a bar chart'], ['Hide the observations widget', 'Hide the observations widget'], ['Make the first KPI the hero metric — full width, larger', 'Promote the first KPI to a hero — full width'], ['Sort the table by date, descending, and limit to 20 rows', 'Sort the table by date desc, top 20'], ['Show a top 10 table sorted by the primary numeric metric, descending', 'Top 10 by primary metric']].map(([prompt, label]) => <button key={prompt} className="chef-suggestion" data-prompt={prompt} onClick={() => void submitChef(prompt)}>{label}</button>)}</div></div>}
-          <div id="chef-msgs" className="chef-msgs">{state.chefHistory.map((message, index) => message.role === 'user' ? <div className="chef-msg-user" key={index}>{message.content}</div> : message.role === 'error' ? <div className="chef-msg-error" key={index}>{message.content}</div> : <div className={`chef-msg-chef ${message.undone ? 'is-undone' : ''}`} key={index}>"{message.content}"{message.previousRecipe && !message.undone && <button className="undo-btn" data-undo={index} type="button" onClick={() => undoChef(index)}>↶ Undo</button>}{message.changes?.length ? <span className="changes">{message.changes.join(' · ')}</span> : null}{message.undone && <span className="changes" style={{ color: 'var(--fg-mute)' }}>reverted</span>}</div>)}{state.chefThinking && <div className="chef-msg-thinking">tasting…</div>}</div>
+          <div id="chef-msgs" className="chef-msgs" aria-live="polite">{state.chefHistory.map((message, index) => message.role === 'user' ? <div className="chef-msg-user" key={index}>{message.content}</div> : message.role === 'error' ? <div className="chef-msg-error" role="alert" key={index}>{message.content}</div> : <div className={`chef-msg-chef ${message.undone ? 'is-undone' : ''}`} key={index}>"{message.content}"{message.previousRecipe && !message.undone && <button className="undo-btn" data-undo={index} type="button" onClick={() => undoChef(index)}>↶ Undo</button>}{message.changes?.length ? <span className="changes">{message.changes.join(' · ')}</span> : null}{message.undone && <span className="changes" style={{ color: 'var(--fg-mute)' }}>reverted</span>}</div>)}{state.chefThinking && <div className="chef-msg-thinking" role="status">tasting…</div>}</div>
         </div>
         <div className="chef-input-row"><textarea id="chef-input" className="chef-input" rows={1} placeholder={chefTargetLabel ? `Adjust ${chefTargetLabel}…` : 'Ask the chef to adjust…'} value={chefInput} onChange={event => setChefInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); const value = chefInput; setChefInput(''); void submitChef(value); } }} /><button id="chef-send" className="chef-send" type="button" disabled={!chefInput.trim() || state.chefThinking} onClick={() => { const value = chefInput; setChefInput(''); void submitChef(value); }}>Send</button></div>
       </aside>
