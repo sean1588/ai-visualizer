@@ -16,6 +16,7 @@ import {
   type DashboardRecipe,
   type GroupedWidget,
   type KpiComparison,
+  type KpiGoalEvaluation,
   type KpiWidget,
   type ObservationsWidget,
   type RenderedWidget,
@@ -31,6 +32,7 @@ interface WidgetGridProps {
   schema: SchemaColumn[];
   changedWidgets: Set<string>;
   comparisons: KpiComparison[];
+  goals: KpiGoalEvaluation[];
   excludeOutliers: boolean;
   onAssumptions: (index: number) => void;
   onInspect: (widget: RenderedWidget, selectedValue: unknown | null) => void;
@@ -200,6 +202,7 @@ function KpiCard({
   rows,
   schema,
   comparison,
+  goal,
   excludeOutliers,
   onAssumptions,
   onInspect,
@@ -209,6 +212,7 @@ function KpiCard({
   rows: Row[];
   schema: SchemaColumn[];
   comparison?: KpiComparison;
+  goal?: KpiGoalEvaluation;
   excludeOutliers: boolean;
   onAssumptions: (index: number) => void;
   onInspect: (widget: RenderedWidget, selectedValue: unknown | null) => void;
@@ -242,6 +246,12 @@ function KpiCard({
             {formatCompact(comparison.absoluteChange, widget.metric, widget.format, { rows, schema })}
           </strong>
           {' '}vs previous dataset · was {formatCompact(comparison.previous, widget.metric, widget.format, { rows, schema })}
+        </div>
+      )}
+      {goal && (
+        <div className={`kpi-goal ${goal.met ? 'met' : ''}`}>
+          <div><span>{goal.met ? 'Goal met' : 'Goal'}</span><strong>{goal.direction === 'at-least' ? '≥' : '≤'} {formatCompact(goal.target, widget.metric, widget.format, { rows, schema })}</strong></div>
+          <div className="kpi-goal-track"><i style={{ width: `${Math.min(100, goal.progress || 0)}%` }} /></div>
         </div>
       )}
       {computed.excludedOutlier && (
@@ -672,6 +682,7 @@ export default function WidgetGrid({
   schema,
   changedWidgets,
   comparisons,
+  goals,
   excludeOutliers,
   onAssumptions,
   onInspect,
@@ -682,6 +693,7 @@ export default function WidgetGrid({
   onChefWidget,
 }: WidgetGridProps) {
   const comparisonsByWidget = new Map(comparisons.map(comparison => [comparison.fingerprint, comparison]));
+  const goalsByWidget = new Map(goals.map(goal => [goal.widgetFingerprint, goal]));
   return (
     <WidgetEditorContext.Provider value={{ count: recipe.widgets.length, onEdit: onEditWidget, onChef: onChefWidget }}>
       <div id="dash-grid" className="dash-grid">
@@ -702,7 +714,7 @@ export default function WidgetGrid({
         const fingerprint = widgetFingerprint(widget);
         const className = changedWidgets.has(fingerprint) ? 'is-changed' : '';
         let content = null;
-        if (widget.type === 'kpi') content = <KpiCard widget={widget} index={index} rows={rows} schema={schema} comparison={comparisonsByWidget.get(fingerprint)} excludeOutliers={excludeOutliers} onAssumptions={onAssumptions} onInspect={onInspect} />;
+        if (widget.type === 'kpi') content = <KpiCard widget={widget} index={index} rows={rows} schema={schema} comparison={comparisonsByWidget.get(fingerprint)} goal={goalsByWidget.get(fingerprint)} excludeOutliers={excludeOutliers} onAssumptions={onAssumptions} onInspect={onInspect} />;
         else if (widget.type === 'observations') content = <ObservationsCard widget={widget} />;
         else if (widget.type === 'donut') content = <DonutCard widget={widget} index={index} rows={rows} schema={schema} onAssumptions={onAssumptions} onInspect={onInspect} />;
         else if (widget.type === 'statlist') content = <StatListCard widget={widget} index={index} rows={rows} schema={schema} onAssumptions={onAssumptions} onInspect={onInspect} />;
