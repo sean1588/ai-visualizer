@@ -6,7 +6,7 @@ import {
   type RecipePayload,
   type Row,
   type SchemaColumn,
-} from './domain';
+} from './domain/index.ts';
 
 interface RecipeLinkPayload {
   version: 1;

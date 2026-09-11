@@ -458,15 +458,32 @@ function App() {
   }, [state]);
 
   useEffect(() => {
-    const linkedRecipe = decodeRecipeFragment(window.location.hash);
-    if (!linkedRecipe) return;
-    dispatch({
-      type: 'patch',
-      value: {
-        pendingRecipe: linkedRecipe,
-        error: `Shared recipe ready: ${linkedRecipe.title || 'untitled'}. Add CSV or JSON data to render it without another AI call.`,
-      },
-    });
+    const loadLinkedRecipe = () => {
+      const linkedRecipe = decodeRecipeFragment(window.location.hash);
+      if (!linkedRecipe) return;
+      setPasteText('');
+      setChefInput('');
+      dispatch({
+        type: 'patch',
+        value: {
+          stage: 'empty',
+          rows: [],
+          schema: [],
+          recipe: null,
+          id: null,
+          dataSource: null,
+          parseHealth: null,
+          previousSnapshot: null,
+          pendingRecipe: linkedRecipe,
+          error: `Shared recipe ready: ${linkedRecipe.title || 'untitled'}. Add CSV or JSON data to render it without another AI call.`,
+          chefOpen: false,
+          chefHistory: [],
+        },
+      });
+    };
+    loadLinkedRecipe();
+    window.addEventListener('hashchange', loadLinkedRecipe);
+    return () => window.removeEventListener('hashchange', loadLinkedRecipe);
   }, []);
 
   useEffect(() => {
