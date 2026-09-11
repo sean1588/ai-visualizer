@@ -47,7 +47,8 @@ jobs:
         run: |
           npm ci
           npm run typecheck
-          npm run build
+          npm test
+          npm run build:public
 
       - name: Install + typecheck + build lambda
         working-directory: lambda
@@ -61,10 +62,6 @@ jobs:
         run: |
           npm ci
           npm run typecheck
-
-      - name: Replace public with frontend production build
-        working-directory: frontend
-        run: npm run build:public
 
       - name: Pulumi
         id: pulumi

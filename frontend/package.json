@@ -8,9 +8,11 @@
     "build": "vite build",
     "build:public": "vite build --outDir ../public",
     "preview": "vite preview",
+    "test": "node --experimental-strip-types --test domain-tests/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "html2canvas": "^1.4.1",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

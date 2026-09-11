@@ -206,17 +206,16 @@ test("planner and Chef prompts use complete-data facts without raw rows", async 
       private_note: `secret-note-${index}`,
     }));
     const result = await page.evaluate(input => {
-      const schema = inferSchema(input);
-      state.rows = input;
-      state.schema = schema;
-      state.recipe = {
+      const api = window.__mise;
+      const schema = api.inferSchema(input);
+      const recipe = {
         title: "Revenue",
         widgets: [{ type: "kpi", span: 3, title: "Revenue", label: "Revenue", metric: "revenue_usd", aggregate: "sum", value: "500" }],
       };
       return {
-        plan: buildPrompt(input, schema, ""),
-        chef: chefBuildPrompt("Make revenue currency"),
-        profile: buildDataProfile(input, schema),
+        plan: api.buildPrompt(input, schema, ""),
+        chef: api.chefBuildPrompt("Make revenue currency", recipe, input, schema),
+        profile: api.buildDataProfile(input, schema),
       };
     }, rows);
 
@@ -443,7 +442,7 @@ test("widget assumptions are visible and editable without another AI call", asyn
     await page.getByRole("button", { name: "Apply assumptions" }).click();
 
     const edited = await page.evaluate(() => {
-      const widget = state.recipe.widgets.find(item => item.type === "kpi");
+      const widget = window.__mise.state.recipe.widgets.find(item => item.type === "kpi");
       return { aggregate: widget.aggregate, format: widget.format };
     });
     assert.deepEqual(edited, { aggregate: "average", format: "currency" });
@@ -581,8 +580,8 @@ test("applying an HTTP recipe to pasted CSV does not advertise refresh", async (
     const chrome = await page.evaluate(() => ({
       pill: document.getElementById("status-pill").innerText,
       refreshDisabled: document.getElementById("refresh-btn").disabled,
-      hasHttp: hasHttpSource(),
-      liveType: state.dataSource?.type || null,
+      hasHttp: window.__mise.hasHttpSource(),
+      liveType: window.__mise.state.dataSource?.type || null,
     }));
 
     assert.doesNotMatch(chrome.pill, /HTTP\s*·\s*refreshable/i);
@@ -600,7 +599,7 @@ test("quoted-comma CSV keeps fields intact and aggregates by the real rep", asyn
   await withPage(async page => {
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
     const result = await page.evaluate(text => {
-      const incoming = incomingKind(text);
+      const incoming = window.__mise.incomingKind(text);
       const rows = incoming.rows;
       const byRep = {};
       for (const row of rows) {
@@ -634,7 +633,7 @@ test("header-only CSV, empty CSV, and a single JSON object are rejected", async 
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
     const messages = await page.evaluate(() => {
       const tryParse = text => {
-        try { incomingKind(text); return "ok"; }
+        try { window.__mise.incomingKind(text); return "ok"; }
         catch (e) { return e.message; }
       };
       return {
@@ -658,14 +657,14 @@ test("top-N table is sorted by the named metric and shows a transform chip", asy
     await page.waitForSelector("#chef-fab.is-visible");
 
     const info = await page.evaluate(() => {
-      const table = state.recipe.widgets.find(w => w.type === "table");
-      const shown = sortedTableRows(table).map(r => r.expansion_usd);
+      const table = window.__mise.state.recipe.widgets.find(w => w.type === "table");
+      const shown = window.__mise.sortedTableRows(table).map(r => r.expansion_usd);
       return {
         sort: table.sort,
         order: table.order,
         limit: table.limit,
         shown,
-        chip: tableTransformLabel(table),
+        chip: window.__mise.tableTransformLabel(table),
       };
     });
 
@@ -754,7 +753,7 @@ test("one-level nested JSON flattens and never prints [object Object]", async ()
       ],
     });
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
-    const parsed = await page.evaluate(rows => incomingKind(JSON.stringify(rows)).rows, NESTED_COMMITS);
+    const parsed = await page.evaluate(rows => window.__mise.incomingKind(JSON.stringify(rows)).rows, NESTED_COMMITS);
     assert.equal(parsed[0]["author.login"], "octocat");
     assert.equal(parsed[0]["commit.message"], "fix parser");
     assert.ok(!JSON.stringify(parsed).includes("[object Object]"));
@@ -786,13 +785,10 @@ test("one row per date×segment is a weekly series, not 36 raw points", async ()
         title: el.querySelector("h3")?.textContent.trim(),
         meta: el.querySelector(".meta")?.textContent.trim(),
       }));
+      const state = window.__mise.state;
       const weekCol = state.schema.find(c => c.name === "week");
-      const mrrSeries = (typeof seriesBy === "function")
-        ? seriesBy(state.rows, "week", "mrr_usd")
-        : state.rows.map(r => ({ x: r.week, y: r.mrr_usd }));
-      const nrrSeries = (typeof seriesBy === "function")
-        ? seriesBy(state.rows, "week", "nrr")
-        : state.rows.map(r => ({ x: r.week, y: r.nrr }));
+      const mrrSeries = window.__mise.seriesBy(state.rows, "week", "mrr_usd", undefined, state.schema);
+      const nrrSeries = window.__mise.seriesBy(state.rows, "week", "nrr", undefined, state.schema);
       const mrrKpi = state.recipe.widgets.find(w => w.type === "kpi" && /mrr/i.test(w.label || w.title || ""));
       return {
         rowCount: state.rows.length,
@@ -842,15 +838,17 @@ test("compact numbers never print 1000B for just-under-a-trillion values", async
   await withPage(async page => {
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
     const formatted = await page.evaluate(() => {
-      state.rows = [{ nps: 61, ratio: 0.61 }, { nps: 70, ratio: 0.7 }];
-      state.schema = inferSchema(state.rows);
+      const rows = [{ nps: 61, ratio: 0.61 }, { nps: 70, ratio: 0.7 }];
+      const schema = window.__mise.inferSchema(rows);
+      const format = (value, column, requested = "auto") =>
+        window.__mise.formatCompact(value, column, requested, { rows, schema });
       return {
-        justUnderT: fmtCompact(999999999999),
-        trillion: fmtCompact(1e12),
-        billion: fmtCompact(1.5e9),
-        wholePercent: fmtCompact(61, "nps", "percent"),
-        ratioPercent: fmtCompact(0.61, "ratio", "percent"),
-        negativeCurrency: fmtCompact(-1200, "revenue_usd", "currency"),
+        justUnderT: format(999999999999),
+        trillion: format(1e12),
+        billion: format(1.5e9),
+        wholePercent: format(61, "nps", "percent"),
+        ratioPercent: format(0.61, "ratio", "percent"),
+        negativeCurrency: format(-1200, "revenue_usd", "currency"),
       };
     });
     assert.doesNotMatch(formatted.justUnderT, /1000\s*[Bb]/);
@@ -883,6 +881,15 @@ async function withPage(fn, options = {}) {
 }
 
 async function mockInference(page, chefRecipe = CHEF_WITHOUT_OBSERVATIONS, planRecipe = PLAN, onRequest = null) {
+  await page.addInitScript(() => {
+    window.html2canvas = async function () {
+      const canvas = document.createElement("canvas");
+      canvas.width = 64;
+      canvas.height = 64;
+      canvas.getContext("2d").fillRect(0, 0, 64, 64);
+      return canvas;
+    };
+  });
   await page.route("**/api/cook", async route => {
     onRequest?.(route.request());
     const body = route.request().postDataJSON();
@@ -891,21 +898,6 @@ async function mockInference(page, chefRecipe = CHEF_WITHOUT_OBSERVATIONS, planR
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ text: JSON.stringify(payload) }),
-    });
-  });
-  await page.route("https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js", async route => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/javascript",
-      body: `
-        window.html2canvas = async function () {
-          const canvas = document.createElement('canvas');
-          canvas.width = 64;
-          canvas.height = 64;
-          canvas.getContext('2d').fillRect(0, 0, 64, 64);
-          return canvas;
-        };
-      `,
     });
   });
 }
