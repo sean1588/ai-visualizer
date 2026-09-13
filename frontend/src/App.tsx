@@ -177,16 +177,16 @@ function tableTransformLabel(widget: TableWidget): string {
   return parts.join(' · ');
 }
 
-function statusLabel(state: AppState): string {
-  if (state.statusMessage) return state.statusMessage;
+function statusLabel(state: AppState): { text: string; saved: boolean } {
+  if (state.statusMessage) return { text: state.statusMessage, saved: !state.statusError };
+  if (state.refreshing) return { text: 'Refreshing…', saved: false };
   if (hasHttpSource(state.dataSource)) {
     const freshness = sourceFreshness(state.dataSource as DataSource, Date.now(), state.updatedAt);
-    if (freshness.status === 'error') return 'HTTP · refresh error';
-    if (freshness.status === 'stale') return 'HTTP · stale';
-    return 'HTTP · refreshable';
+    if (freshness.status === 'error') return { text: 'Refresh failed', saved: false };
+    if (freshness.status === 'stale') return { text: 'Stale · refresh available', saved: false };
   }
-  if (state.recipe) return 'Live · ready to export';
-  return 'Local · not exported';
+  if (state.id && state.updatedAt) return { text: `Saved in this browser · ${relativeTime(state.updatedAt)}`, saved: true };
+  return { text: 'Not saved yet', saved: false };
 }
 
 function signedCount(value: number, noun: string): string {
@@ -1700,6 +1700,7 @@ function App() {
   const presentAction = actionById('present');
   const analyzeAction = actionById('analyze');
   const showDashboardChrome = state.stage === 'dash' && !!state.recipe;
+  const status = statusLabel(state);
   return (
     <>
       <header className="top">
@@ -1710,7 +1711,7 @@ function App() {
         </div>
         {showDashboardChrome && (
           <div className="top-right">
-            <span id="status-pill" className="pill" role="status" aria-live="polite"><span className={`pill-dot ${state.recipe && !state.statusError ? 'active' : ''}`} />{statusLabel(state)}</span>
+            <span id="status-pill" className="pill" role="status" aria-live="polite"><span className={`pill-dot ${status.saved ? 'active' : ''}`} />{status.text}</span>
             {undoAction?.visible && <button id="recipe-undo" className="btn btn-ghost btn-icon" type="button" aria-label="Undo" title={`Undo · ${undoAction.shortcut}`} disabled={!undoAction.enabled} onClick={undoAction.run}>↶</button>}
             {redoAction?.visible && <button id="recipe-redo" className="btn btn-ghost btn-icon" type="button" aria-label="Redo" title={`Redo · ${redoAction.shortcut}`} disabled={!redoAction.enabled} onClick={redoAction.run}>↷</button>}
             <Menu id="data-menu" label="Data" actions={dashboardActions.filter(action => action.group === 'data')} />
