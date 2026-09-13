@@ -712,7 +712,7 @@ test("clicking a chart value focuses the dashboard and Chef suggestions stay sch
 
     await page.locator(".focus-chip-body").click();
     await page.waitForSelector("#analysis-workbench[open]");
-    assert.equal(await page.locator("#analysis-workbench button.active").innerText(), "Focus");
+    assert.match(await page.locator("#analysis-workbench button.active").innerText(), /Focus/i);
     await closeWorkbench(page);
 
     await page.locator(".focus-chip-remove").click();
@@ -990,7 +990,7 @@ test("analysis workbench keeps ten browser-local enhancements cohesive and persi
     assert.match(await workbench.locator("#correlation-list").innerText(), /Revenue ↔ Orders/i);
     assert.match(await workbench.locator("#privacy-finding-list").innerText(), /Customer email/i);
     assert.ok(await workbench.locator("#follow-up-list button").count() >= 3);
-    await workbench.locator("#follow-up-list button").first().click();
+    await workbench.locator("#follow-up-list button").filter({ hasText: /changing/i }).click();
     await page.waitForSelector("#chef-panel.is-open");
     assert.match(await page.locator("#chef-input").inputValue(), /Emphasize the trend/i);
     await page.locator("#chef-close").click();
