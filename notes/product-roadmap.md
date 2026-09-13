@@ -147,6 +147,17 @@ emits content-hashed assets, and the PNG renderer is bundled as a lazy chunk.
 - Clicking a chart value opens the row inspector with Focus dashboard on
   `{column} = {value}`; that path writes one equals filter per column so another
   bar click moves focus instead of stacking contradictory rules.
+- On viewports ≤720px the header is sticky and 48px tall: mark, a truncated
+  breadcrumb, and a status pill reduced to its dot plus Saved / Refreshing… /
+  Stale / Failed. Data, Export, Present, undo/redo, and the ⌘K hint move out of
+  the header.
+- The dashboard stage gets a four-target bottom bar (Analyze, Chef, Export,
+  More) built from the action table; Export and More open `Menu` as a bottom
+  sheet. `#chef-fab` is hidden at this width. The bar is absent on desktop, in
+  presentation mode, and while the Chef panel or workbench is open.
+- Phone widgets are full width with no page-level horizontal scroll; KPIs pair
+  two-up between 480px and 720px; tables scroll inside the card. The landing page
+  still shows only the mark and breadcrumb.
 - Active filters render as dismissible chips in the dashboard head (`Focused · n
   of N rows`); chip text stays visible in presentation mode while × and Clear all
   hide with the rest of the chrome.
