@@ -59,6 +59,7 @@ import {
 } from './domain';
 import { buildDashboardActions, MOD_KEY, type DashboardAction } from './actions';
 import AnalysisWorkbench from './AnalysisWorkbench';
+import CommandPalette from './CommandPalette';
 import DataHealthDialog from './DataHealth';
 import ExampleGallery from './ExampleGallery';
 import { EXAMPLE_PLATES, type ExamplePlate } from './examples';
@@ -548,13 +549,8 @@ function App() {
     document.body.classList.toggle('presentation-mode', state.presentationMode);
     if (!state.presentationMode) return;
     const focusTimer = window.setTimeout(() => document.getElementById('exit-presentation')?.focus(), 0);
-    const exit = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') dispatch({ type: 'patch', value: { presentationMode: false } });
-    };
-    window.addEventListener('keydown', exit);
     return () => {
       window.clearTimeout(focusTimer);
-      window.removeEventListener('keydown', exit);
       window.setTimeout(() => presentationReturnFocus.current?.isConnected && presentationReturnFocus.current.focus(), 0);
     };
   }, [state.presentationMode]);
@@ -1633,6 +1629,71 @@ function App() {
     undo: () => navigateRecipeHistory(-1),
     redo: () => navigateRecipeHistory(1),
   }), [copyRecipeLink, exportDashboardBundle, exportPng, exportRecipe, exportStandalone, health, healthIssueCount, isHttp, navigateRecipeHistory, openChef, openWorkbench, refreshDashboard, state.alerts.length, state.recipe, state.recipeHistory.length, state.recipeHistoryIndex, state.refreshing, togglePresentation, triggeredAlerts]);
+  const actionsRef = useRef(dashboardActions);
+  useEffect(() => {
+    actionsRef.current = dashboardActions;
+  }, [dashboardActions]);
+
+  useEffect(() => {
+    const runAction = (id: string) => {
+      const action = actionsRef.current.find(candidate => candidate.id === id);
+      if (action?.visible && action.enabled) action.run();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      const current = stateRef.current;
+      if (current.stage !== 'dash' || !current.recipe) return;
+      const target = event.target;
+      const editable = target instanceof HTMLElement && !!target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
+      const modifier = event.metaKey || event.ctrlKey;
+      const key = event.key.toLowerCase();
+      if (event.key === 'Escape') {
+        if (current.paletteOpen) {
+          dispatch({ type: 'patch', value: { paletteOpen: false } });
+          return;
+        }
+        const openMenu = document.querySelector<HTMLDetailsElement>('details.menu[open]');
+        if (openMenu) {
+          openMenu.removeAttribute('open');
+          openMenu.querySelector<HTMLElement>('summary')?.focus();
+          return;
+        }
+        if (current.workbenchOpen) {
+          dispatch({ type: 'patch', value: { workbenchOpen: false } });
+          return;
+        }
+        if (current.chefOpen) {
+          dispatch({ type: 'patch', value: { chefOpen: false, chefWidgetIndex: null } });
+          return;
+        }
+        if (current.presentationMode) dispatch({ type: 'patch', value: { presentationMode: false } });
+        return;
+      }
+      if (modifier && key === 'k') {
+        event.preventDefault();
+        dispatch({ type: 'patch', value: { paletteOpen: !current.paletteOpen } });
+        return;
+      }
+      if (editable) return;
+      if (modifier && key === 'z') {
+        event.preventDefault();
+        runAction(event.shiftKey ? 'redo' : 'undo');
+        return;
+      }
+      if (modifier || event.altKey || document.querySelector('dialog[open]')) return;
+      if (event.key === '/') {
+        event.preventDefault();
+        runAction('chef');
+        return;
+      }
+      if (key === 'p' && !event.shiftKey) {
+        event.preventDefault();
+        runAction('present');
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const actionById = (id: string): DashboardAction | undefined => dashboardActions.find(action => action.id === id);
   const undoAction = actionById('undo');
   const redoAction = actionById('redo');
@@ -1784,6 +1845,7 @@ function App() {
         <div className="chef-input-row"><textarea id="chef-input" className="chef-input" rows={1} placeholder={chefTargetLabel ? `Adjust ${chefTargetLabel}…` : 'Ask the chef to adjust…'} value={chefInput} onChange={event => setChefInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); const value = chefInput; setChefInput(''); void submitChef(value); } }} /><button id="chef-send" className="chef-send" type="button" disabled={!chefInput.trim() || state.chefThinking} onClick={() => { const value = chefInput; setChefInput(''); void submitChef(value); }}>Send</button></div>
       </aside>
 
+      <CommandPalette open={state.paletteOpen} actions={dashboardActions} onClose={() => dispatch({ type: 'patch', value: { paletteOpen: false } })} />
       <AssumptionsDialog state={state} onClose={() => dispatch({ type: 'patch', value: { assumptionsWidgetIndex: null } })} onApply={applyAssumption} />
       <InspectorDialog state={state} onClose={() => dispatch({ type: 'patch', value: { inspector: null } })} />
       <DataHealthDialog

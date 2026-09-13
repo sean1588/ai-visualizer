@@ -527,6 +527,17 @@
   .focus-empty { display: grid; place-items: center; gap: 8px; margin: 22px 32px 60px; padding: 60px 20px; border: 1px dashed var(--rule); background: var(--bg-elev); text-align: center; }
   .focus-empty strong { font-family: var(--font-display); font-style: italic; font-size: 24px; }
   .focus-empty span { max-width: 52ch; color: var(--fg-mute); }
+  .command-palette { width: min(600px, calc(100vw - 32px)); }
+  .command-input { width: 100%; padding: 11px 12px; border: 1px solid var(--rule-soft); background: var(--bg-elev); color: var(--fg); font: 14px var(--font-body); outline: none; }
+  .command-input:focus { border-color: var(--rule); }
+  .command-list { list-style: none; margin: 10px 0 0; padding: 0; max-height: min(420px, 50vh); overflow: auto; }
+  .command-group { padding: 12px 10px 4px; font-family: var(--font-mono); font-size: 9px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--fg-mute); }
+  .command-item { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 8px 10px; border-bottom: 1px dashed var(--rule-soft); cursor: pointer; }
+  .command-item > span { display: grid; gap: 1px; }
+  .command-item strong { font-weight: 500; }
+  .command-item small { color: var(--fg-mute); font-size: 11px; }
+  .command-item[aria-selected="true"] { background: var(--bg-soft); box-shadow: inset 3px 0 0 var(--accent); }
+  .command-empty { padding: 18px 10px; color: var(--fg-mute); }
   .presentation-exit { position: fixed; top: 14px; right: 16px; z-index: 80; box-shadow: 3px 3px 0 var(--rule); }
   body.presentation-mode .top, body.presentation-mode .dash-actions, body.presentation-mode .recipe-history, body.presentation-mode .recurring-report, body.presentation-mode .chef-fab, body.presentation-mode .chef-panel, body.presentation-mode .w-actions, body.presentation-mode .table-toolbar, body.presentation-mode #data-health-btn, body.presentation-mode .focus-summary button, body.presentation-mode .focus-empty button { display: none !important; }
   body.presentation-mode .dash-head { padding: 34px 40px 20px; }
