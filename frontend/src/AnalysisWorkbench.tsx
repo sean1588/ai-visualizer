@@ -9,6 +9,7 @@ import {
   formatCompact,
   humanize,
   kpiGoalsFromRecipe,
+  operatorLabel,
   scanSensitiveColumns,
   widgetFingerprint,
   type DashboardFilter,
@@ -30,15 +31,6 @@ import type { WorkbenchTab } from './state';
 import { parseDashboardBundle } from './workspace';
 
 const TABS: WorkbenchTab[] = ['focus', 'goals', 'discover', 'brief', 'recipe', 'notes'];
-
-const OPERATOR_LABELS: Record<FilterOperator, string> = {
-  equals: 'equals',
-  contains: 'contains',
-  'at-least': 'at least',
-  'at-most': 'at most',
-  after: 'on or after',
-  before: 'on or before',
-};
 
 function profileDetail(fact: ReturnType<typeof buildDataProfile>['facts'][number]): string {
   if (fact.type === 'number') {
@@ -219,13 +211,13 @@ export default function AnalysisWorkbench({
             <div className="workbench-intro"><div role="status" aria-live="polite"><span className="eyebrow">Focus filters</span><h3>{rows.length} of {allRows.length} rows in view</h3></div><button type="button" className="btn btn-ghost" disabled={!filters.length} onClick={() => onFilters([])}>Clear filters</button></div>
             <form id="focus-filter-form" className="workbench-form" onSubmit={addFilter}>
               <label><span>Column</span><select name="column" value={columnName} onChange={event => setColumnName(event.target.value)}>{schema.map(column => <option value={column.name} key={column.name}>{humanize(column.name)}</option>)}</select></label>
-              <label><span>Rule</span><select name="operator" value={operator} onChange={event => setOperator(event.target.value as FilterOperator)}>{operators.map(value => <option value={value} key={value}>{OPERATOR_LABELS[value]}</option>)}</select></label>
+              <label><span>Rule</span><select name="operator" value={operator} onChange={event => setOperator(event.target.value as FilterOperator)}>{operators.map(value => <option value={value} key={value}>{operatorLabel(value)}</option>)}</select></label>
               <label><span>Value</span><input name="value" type={selectedColumn?.type === 'number' ? 'number' : selectedColumn?.type === 'date' ? 'date' : 'text'} step="any" required /></label>
               <button type="submit" className="btn btn-primary">Add filter</button>
             </form>
             <div id="active-filter-list" className="active-filter-list">
               {!filters.length && <p>No filters active. Every widget uses the complete dataset.</p>}
-              {filters.map(filter => <button type="button" key={filter.id} onClick={() => onFilters(filters.filter(candidate => candidate.id !== filter.id))}>{humanize(filter.column)} {OPERATOR_LABELS[filter.operator]} “{filter.value}” <span>×</span></button>)}
+              {filters.map(filter => <button type="button" key={filter.id} onClick={() => onFilters(filters.filter(candidate => candidate.id !== filter.id))}>{humanize(filter.column)} {operatorLabel(filter.operator)} “{filter.value}” <span>×</span></button>)}
             </div>
             <div className="saved-view-panel">
               <div><span className="eyebrow">Saved views</span><p>Keep useful slices with this plate.</p></div>

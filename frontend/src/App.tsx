@@ -6,6 +6,7 @@ import {
   applyRecipeToRows,
   buildDataProfile,
   buildExecutiveBrief,
+  buildFollowUpQuestions,
   buildParseHealth,
   buildRecipePayload,
   captureDatasetSnapshot,
@@ -23,18 +24,21 @@ import {
   hasUsefulChartOpportunity,
   humanize,
   incomingKind,
+  inspectedColumn,
   inferSchema,
   isRecipePayload,
   isTableOnlyRecipe,
   metricValues,
   normalizeTableFields,
   normalizePublicDataUrl,
+  operatorLabel,
   parseAndValidateRecipe,
   parseCsvRecords,
   parseInput,
   refreshCadence,
   repairCanonicalWidgets,
   seriesBy,
+  setEqualsFilter,
   sortTableRows,
   sourceFreshness,
   splitCsv,
@@ -412,7 +416,7 @@ function AssumptionsDialog({
   );
 }
 
-function InspectorDialog({ state, onClose }: { state: AppState; onClose: () => void }) {
+function InspectorDialog({ state, onClose, onFocusValue }: { state: AppState; onClose: () => void; onFocusValue: (column: string, value: unknown) => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<string | null>(null);
@@ -450,10 +454,27 @@ function InspectorDialog({ state, onClose }: { state: AppState; onClose: () => v
   if (!inspector) return null;
   const visible = filteredRows.slice(0, 200);
   const widgetTitle = inspector.widget.title || ('label' in inspector.widget ? inspector.widget.label : 'Widget');
+  const focusColumn = inspector.selectedValue == null ? null : inspectedColumn(inspector.widget);
   return (
     <dialog id="inspector-dialog" className="mise-dialog" ref={dialogRef} onClose={onClose}>
       <div className="dialog-head">
-        <div><div className="eyebrow eyebrow-accent">Contributing data</div><h2 id="inspector-title">{widgetTitle} · {inspector.selectedValue === null ? 'source rows' : String(inspector.selectedValue)}</h2></div>
+        <div>
+          <div className="eyebrow eyebrow-accent">Contributing data</div>
+          <h2 id="inspector-title">{widgetTitle} · {inspector.selectedValue === null ? 'source rows' : String(inspector.selectedValue)}</h2>
+          {focusColumn && inspector.selectedValue != null && (
+            <button
+              id="focus-on-value"
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                onFocusValue(focusColumn, inspector.selectedValue);
+                dialogRef.current?.close();
+              }}
+            >
+              Focus dashboard on {humanize(focusColumn)} = {String(inspector.selectedValue)}
+            </button>
+          )}
+        </div>
         <button id="inspector-close" className="dialog-close" type="button" aria-label="Close" onClick={() => dialogRef.current?.close()}>×</button>
       </div>
       <div className="dialog-body">
@@ -1340,6 +1361,13 @@ function App() {
     track('chart_inspected', { widgetType: widget.type });
   }, []);
 
+  const focusOnInspectorValue = useCallback((column: string, value: unknown) => {
+    const current = stateRef.current;
+    track('focus_from_chart', { widgetType: current.inspector?.widget.type });
+    const filters = setEqualsFilter(current.filters, column, value, `filter_${Date.now().toString(36)}`);
+    if (filters !== current.filters) updateWorkbench({ filters });
+  }, [updateWorkbench]);
+
   const submitChef = useCallback(async (request: string) => {
     const text = request.trim();
     const current = stateRef.current;
@@ -1603,6 +1631,10 @@ function App() {
   const currentTitle = state.recipe?.title || state.title;
   const chefTarget = state.chefWidgetIndex === null ? null : state.recipe?.widgets[state.chefWidgetIndex] || null;
   const chefTargetLabel = chefTarget?.title || (chefTarget && 'label' in chefTarget ? chefTarget.label : null);
+  const chefFollowUps = useMemo(
+    () => (state.recipe ? buildFollowUpQuestions(state.recipe, state.schema).slice(0, 5) : []),
+    [state.recipe, state.schema],
+  );
   const steps: Array<[LoadingStep, string]> = [['parse', 'Parse data'], ['infer', 'Infer schema'], ['layout', 'Propose layout'], ['render', 'Render dashboard']];
   const isHttp = hasHttpSource(state.dataSource);
   const dashboardActions = useMemo(() => buildDashboardActions({
@@ -1795,7 +1827,21 @@ function App() {
               <div id="dash-meta" className="dash-head-meta">
                 {state.rows.length} rows · {state.schema.length} cols · updated {new Date(state.updatedAt || Date.now()).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
               </div>
-              {!!state.filters.length && <div id="focus-summary" className="focus-summary"><strong>Focused view</strong><span>{focusedRows.length} of {state.rows.length} rows · {state.filters.length} active filter{state.filters.length === 1 ? '' : 's'}</span><button type="button" onClick={() => updateWorkbench({ filters: [] })}>Clear</button></div>}
+              {!!state.filters.length && (
+                <div id="focus-summary" className="focus-summary focus-chips">
+                  <span className="focus-chips-label"><strong>Focused</strong> · {focusedRows.length} of {state.rows.length} rows</span>
+                  {state.filters.map(filter => {
+                    const label = `${humanize(filter.column)} ${operatorLabel(filter.operator)} ${filter.value}`;
+                    return (
+                      <span className="focus-chip" key={filter.id}>
+                        <button type="button" className="focus-chip-body" onClick={() => dispatch({ type: 'patch', value: { workbenchOpen: true, workbenchTab: 'focus' } })}>{label}</button>
+                        <button type="button" className="focus-chip-remove" aria-label={`Remove filter ${label}`} onClick={() => updateWorkbench({ filters: state.filters.filter(candidate => candidate.id !== filter.id) })}>×</button>
+                      </span>
+                    );
+                  })}
+                  <button id="focus-clear" type="button" onClick={() => updateWorkbench({ filters: [] })}>Clear all</button>
+                </div>
+              )}
               {state.dashboardNotes && <p id="dashboard-context" className="dashboard-context">{state.dashboardNotes}</p>}
               {health && (
                 <div id="dash-health" className="dash-health">
@@ -1840,15 +1886,15 @@ function App() {
       <aside id="chef-panel" className={`chef-panel ${state.chefOpen ? 'is-open' : ''}`} aria-label="The Chef">
         <div className="chef-hd"><div className="chef-hd-l"><span className="chef-hd-glyph">M</span><span className="chef-hd-name">The Chef</span>{chefTargetLabel && <span id="chef-target" className="chef-hd-tag">Editing · {chefTargetLabel}</span>}</div><button id="chef-close" className="chef-close" type="button" aria-label="Close" onClick={() => dispatch({ type: 'patch', value: { chefOpen: false, chefWidgetIndex: null } })}>×</button></div>
         <div id="chef-body" className="chef-body">
-          {!state.chefHistory.length && !state.chefThinking && <div id="chef-empty" className="chef-empty"><div className="chef-empty-eyebrow">Tell the chef what to change</div><p className="chef-empty-title">"Swap the donut for a bar chart, sorted by month."</p><div className="chef-suggestions">{[['Swap the donut for a bar chart', 'Swap the donut for a bar chart'], ['Hide the observations widget', 'Hide the observations widget'], ['Make the first KPI the hero metric — full width, larger', 'Promote the first KPI to a hero — full width'], ['Sort the table by date, descending, and limit to 20 rows', 'Sort the table by date desc, top 20'], ['Show a top 10 table sorted by the primary numeric metric, descending', 'Top 10 by primary metric']].map(([prompt, label]) => <button key={prompt} className="chef-suggestion" data-prompt={prompt} onClick={() => void submitChef(prompt)}>{label}</button>)}</div></div>}
-          <div id="chef-msgs" className="chef-msgs" aria-live="polite">{state.chefHistory.map((message, index) => message.role === 'user' ? <div className="chef-msg-user" key={index}>{message.content}</div> : message.role === 'error' ? <div className="chef-msg-error" role="alert" key={index}>{message.content}</div> : <div className={`chef-msg-chef ${message.undone ? 'is-undone' : ''}`} key={index}>"{message.content}"{message.previousRecipe && !message.undone && <button className="undo-btn" data-undo={index} type="button" onClick={() => undoChef(index)}>↶ Undo</button>}{message.changes?.length ? <span className="changes">{message.changes.join(' · ')}</span> : null}{message.undone && <span className="changes" style={{ color: 'var(--fg-mute)' }}>reverted</span>}</div>)}{state.chefThinking && <div className="chef-msg-thinking" role="status">tasting…</div>}</div>
+          {!state.chefHistory.length && !state.chefThinking && <div id="chef-empty" className="chef-empty"><div className="chef-empty-eyebrow">Tell the chef what to change</div>{chefFollowUps[0] && <p className="chef-empty-title">"{chefFollowUps[0].prompt}"</p>}<div className="chef-suggestions">{chefFollowUps.map(question => <button key={question.id} type="button" className="chef-suggestion" data-prompt={question.prompt} onClick={() => void submitChef(question.prompt)}>{question.label}</button>)}</div></div>}
+          <div id="chef-msgs" className="chef-msgs" aria-live="polite">{state.chefHistory.map((message, index) => message.role === 'user' ? <div className="chef-msg-user" key={index}>{message.content}</div> : message.role === 'error' ? <div className="chef-msg-error" role="alert" key={index}>{message.content}</div> : <div className={`chef-msg-chef ${message.undone ? 'is-undone' : ''}`} key={index}>"{message.content}"{message.previousRecipe && !message.undone && <button className="undo-btn" data-undo={index} type="button" onClick={() => undoChef(index)}>↶ Undo</button>}{message.changes?.length ? <span className="changes">{message.changes.join(' · ')}</span> : null}{message.undone && <span className="changes" style={{ color: 'var(--fg-mute)' }}>reverted</span>}{index === state.chefHistory.length - 1 && !message.undone && !!chefFollowUps.length && <div id="chef-try-next" className="chef-try-next"><span className="chef-try-next-label">Try next</span>{chefFollowUps.slice(0, 3).map(question => <button key={question.id} type="button" className="chef-suggestion" data-prompt={question.prompt} onClick={() => void submitChef(question.prompt)}>{question.label}</button>)}</div>}</div>)}{state.chefThinking && <div className="chef-msg-thinking" role="status">tasting…</div>}</div>
         </div>
         <div className="chef-input-row"><textarea id="chef-input" className="chef-input" rows={1} placeholder={chefTargetLabel ? `Adjust ${chefTargetLabel}…` : 'Ask the chef to adjust…'} value={chefInput} onChange={event => setChefInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); const value = chefInput; setChefInput(''); void submitChef(value); } }} /><button id="chef-send" className="chef-send" type="button" disabled={!chefInput.trim() || state.chefThinking} onClick={() => { const value = chefInput; setChefInput(''); void submitChef(value); }}>Send</button></div>
       </aside>
 
       <CommandPalette open={state.paletteOpen} actions={dashboardActions} onClose={() => dispatch({ type: 'patch', value: { paletteOpen: false } })} />
       <AssumptionsDialog state={state} onClose={() => dispatch({ type: 'patch', value: { assumptionsWidgetIndex: null } })} onApply={applyAssumption} />
-      <InspectorDialog state={state} onClose={() => dispatch({ type: 'patch', value: { inspector: null } })} />
+      <InspectorDialog state={state} onClose={() => dispatch({ type: 'patch', value: { inspector: null } })} onFocusValue={focusOnInspectorValue} />
       <DataHealthDialog
         open={state.healthOpen}
         health={state.parseHealth}
