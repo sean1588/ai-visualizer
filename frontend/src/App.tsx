@@ -69,6 +69,7 @@ import ExampleGallery from './ExampleGallery';
 import { EXAMPLE_PLATES, type ExamplePlate } from './examples';
 import { AlertsDialog } from './InsightsDialogs';
 import Menu from './Menu';
+import MobileActionBar, { useCompactViewport } from './MobileActionBar';
 import { buildChefPrompt, buildPrompt } from './prompts';
 import { complete, fetchRemoteData } from './services';
 import { buildRecipeLink, buildStandaloneHtml, decodeRecipeFragment } from './sharing';
@@ -181,16 +182,21 @@ function tableTransformLabel(widget: TableWidget): string {
   return parts.join(' · ');
 }
 
-function statusLabel(state: AppState): { text: string; saved: boolean } {
-  if (state.statusMessage) return { text: state.statusMessage, saved: !state.statusError };
-  if (state.refreshing) return { text: 'Refreshing…', saved: false };
+function statusLabel(state: AppState): { text: string; saved: boolean; short: string } {
+  if (state.statusMessage) {
+    const text = state.statusMessage;
+    const saved = !state.statusError;
+    const short = state.statusError ? 'Failed' : /refreshing/i.test(text) ? 'Refreshing…' : /stale/i.test(text) ? 'Stale' : 'Saved';
+    return { text, saved, short };
+  }
+  if (state.refreshing) return { text: 'Refreshing…', saved: false, short: 'Refreshing…' };
   if (hasHttpSource(state.dataSource)) {
     const freshness = sourceFreshness(state.dataSource as DataSource, Date.now(), state.updatedAt);
-    if (freshness.status === 'error') return { text: 'Refresh failed', saved: false };
-    if (freshness.status === 'stale') return { text: 'Stale · refresh available', saved: false };
+    if (freshness.status === 'error') return { text: 'Refresh failed', saved: false, short: 'Failed' };
+    if (freshness.status === 'stale') return { text: 'Stale · refresh available', saved: false, short: 'Stale' };
   }
-  if (state.id && state.updatedAt) return { text: `Saved in this browser · ${relativeTime(state.updatedAt)}`, saved: true };
-  return { text: 'Not saved yet', saved: false };
+  if (state.id && state.updatedAt) return { text: `Saved in this browser · ${relativeTime(state.updatedAt)}`, saved: true, short: 'Saved' };
+  return { text: 'Not saved yet', saved: false, short: 'Saved' };
 }
 
 function signedCount(value: number, noun: string): string {
@@ -510,6 +516,7 @@ function App() {
   const [fileName, setFileName] = useState('no file selected');
   const [chefInput, setChefInput] = useState('');
   const [clock, setClock] = useState(Date.now());
+  const compact = useCompactViewport();
 
   useEffect(() => {
     stateRef.current = state;
@@ -1764,13 +1771,17 @@ function App() {
         </div>
         {showDashboardChrome && (
           <div className="top-right">
-            <span id="status-pill" className="pill" role="status" aria-live="polite"><span className={`pill-dot ${status.saved ? 'active' : ''}`} />{status.text}</span>
-            {undoAction?.visible && <button id="recipe-undo" className="btn btn-ghost btn-icon" type="button" aria-label="Undo" title={`Undo · ${undoAction.shortcut}`} disabled={!undoAction.enabled} onClick={undoAction.run}>↶</button>}
-            {redoAction?.visible && <button id="recipe-redo" className="btn btn-ghost btn-icon" type="button" aria-label="Redo" title={`Redo · ${redoAction.shortcut}`} disabled={!redoAction.enabled} onClick={redoAction.run}>↷</button>}
-            <Menu id="data-menu" label="Data" actions={dashboardActions.filter(action => action.group === 'data')} />
-            <Menu id="export-menu" label="Export" actions={dashboardActions.filter(action => action.group === 'export')} />
-            {presentAction?.visible && <button id="presentation-mode" className="btn btn-ghost" type="button" title={presentAction.hint} onClick={presentAction.run}>Present</button>}
-            <kbd className="shortcut-hint" title="Command palette">{MOD_KEY}K</kbd>
+            <span id="status-pill" className="pill" role="status" aria-live="polite"><span className={`pill-dot ${status.saved ? 'active' : ''}`} /><span className="status-full">{status.text}</span><span className="status-short" aria-hidden="true">{status.short}</span></span>
+            {!compact && (
+              <>
+                {undoAction?.visible && <button id="recipe-undo" className="btn btn-ghost btn-icon" type="button" aria-label="Undo" title={`Undo · ${undoAction.shortcut}`} disabled={!undoAction.enabled} onClick={undoAction.run}>↶</button>}
+                {redoAction?.visible && <button id="recipe-redo" className="btn btn-ghost btn-icon" type="button" aria-label="Redo" title={`Redo · ${redoAction.shortcut}`} disabled={!redoAction.enabled} onClick={redoAction.run}>↷</button>}
+                <Menu id="data-menu" label="Data" actions={dashboardActions.filter(action => action.group === 'data')} />
+                <Menu id="export-menu" label="Export" actions={dashboardActions.filter(action => action.group === 'export')} />
+                {presentAction?.visible && <button id="presentation-mode" className="btn btn-ghost" type="button" title={presentAction.hint} onClick={presentAction.run}>Present</button>}
+                <kbd className="shortcut-hint" title="Command palette">{MOD_KEY}K</kbd>
+              </>
+            )}
           </div>
         )}
       </header>
@@ -1903,6 +1914,7 @@ function App() {
         )}
       </section>
 
+      {showDashboardChrome && compact && !state.presentationMode && !state.chefOpen && !state.workbenchOpen && <MobileActionBar actions={dashboardActions} />}
       {state.stage === 'dash' && !state.chefOpen && <button id="chef-fab" className="chef-fab is-visible" type="button" onClick={() => dispatch({ type: 'patch', value: { chefOpen: true, chefWidgetIndex: null } })}><span className="chef-fab-glyph">M</span><span>Talk to the chef</span></button>}
       <aside id="chef-panel" className={`chef-panel ${state.chefOpen ? 'is-open' : ''}`} aria-label="The Chef">
         <div className="chef-hd"><div className="chef-hd-l"><span className="chef-hd-glyph">M</span><span className="chef-hd-name">The Chef</span>{chefTargetLabel && <span id="chef-target" className="chef-hd-tag">Editing · {chefTargetLabel}</span>}</div><button id="chef-close" className="chef-close" type="button" aria-label="Close" onClick={() => dispatch({ type: 'patch', value: { chefOpen: false, chefWidgetIndex: null } })}>×</button></div>

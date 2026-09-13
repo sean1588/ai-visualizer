@@ -2,7 +2,7 @@ import { useEffect, useRef, type KeyboardEvent, type SyntheticEvent } from 'reac
 
 import { actionElementId, type DashboardAction } from './actions';
 
-export default function Menu({ id, label, actions }: { id: string; label: string; actions: DashboardAction[] }) {
+export default function Menu({ id, label, actions, sheet = false }: { id: string; label: string; actions: DashboardAction[]; sheet?: boolean }) {
   const ref = useRef<HTMLDetailsElement>(null);
   const items = actions.filter(action => action.visible);
 
@@ -49,8 +49,9 @@ export default function Menu({ id, label, actions }: { id: string; label: string
   };
 
   return (
-    <details className="menu" ref={ref} onToggle={handleToggle} onKeyDown={handleKeyDown}>
-      <summary id={id} className="btn btn-ghost" aria-haspopup="menu">{label}<span className="menu-caret" aria-hidden="true">▾</span></summary>
+    <details className={sheet ? 'menu menu-sheet' : 'menu'} ref={ref} onToggle={handleToggle} onKeyDown={handleKeyDown}>
+      <summary id={id} className="btn btn-ghost" aria-haspopup="menu">{label}{!sheet && <span className="menu-caret" aria-hidden="true">▾</span>}</summary>
+      {sheet && <button type="button" className="menu-backdrop" aria-label="Close menu" tabIndex={-1} onClick={close} />}
       <div className="menu-list" role="menu" aria-labelledby={id}>
         {items.map(action => (
           <button
