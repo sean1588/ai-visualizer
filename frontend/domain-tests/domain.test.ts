@@ -26,13 +26,16 @@ import {
   formatFull,
   incomingKind,
   inferSchema,
+  inspectedColumn,
   normalizePublicDataUrl,
+  operatorLabel,
   parseAndValidateRecipe,
   parseCsvRecords,
   parseJsonRecords,
   refreshCadence,
   scanSensitiveColumns,
   seriesBy,
+  setEqualsFilter,
   sortTableRows,
   sourceFreshness,
   toCanonicalWidgets,
@@ -321,6 +324,28 @@ test('widget fingerprints, diffs, and contributing rows preserve selection seman
     { region: 'east', revenue: 20 },
   ];
   assert.deepEqual(contributingRows(widget, 'west', rows), [{ region: 'west', revenue: 10 }]);
+  assert.equal(inspectedColumn(widget), 'region');
+  assert.equal(inspectedColumn({
+    type: 'bar',
+    span: 6,
+    title: 'Revenue over time',
+    x: 'month',
+    y: 'revenue',
+  }), 'month');
+  assert.equal(inspectedColumn({
+    type: 'countbar',
+    span: 6,
+    title: 'Records by region',
+    cat: 'region',
+  }), 'region');
+  assert.equal(inspectedColumn({
+    type: 'kpi',
+    span: 3,
+    label: 'Revenue',
+    metric: 'revenue',
+    value: '10',
+    delta: null,
+  }), null);
 });
 
 test('recurring snapshots compare KPI values, row counts, and schema drift compactly', () => {
@@ -594,7 +619,7 @@ test('workbench goals, privacy scan, relationships, and follow-ups are determini
     observations: 6,
   });
   const questions = buildFollowUpQuestions(recipe, schema);
-  assert.deepEqual(questions.map(question => question.id), ['trend', 'segments', 'relationship', 'top-records']);
+  assert.deepEqual(questions.map(question => question.id), ['trend', 'segments', 'relationship', 'top-records', 'sort-table']);
 });
 
 test('focus filters distinguish missing zeroes and compare date calendar days', () => {
@@ -647,4 +672,63 @@ test('privacy scan covers complete datasets and normalized camel-case names', ()
   const findings = scanSensitiveColumns(rows, schema);
   assert.equal(findings.find(finding => finding.column === 'customerEmail')?.matchingRows, 1);
   assert.equal(findings.find(finding => finding.column === 'secretToken')?.kind, 'credential');
+});
+
+test('operator labels and equals-focus filters replace one value per column', () => {
+  assert.equal(operatorLabel('equals'), 'is');
+  assert.equal(operatorLabel('contains'), 'contains');
+  assert.equal(operatorLabel('at-least'), '≥');
+  assert.equal(operatorLabel('at-most'), '≤');
+  assert.equal(operatorLabel('after'), 'after');
+  assert.equal(operatorLabel('before'), 'before');
+
+  const filters: DashboardFilter[] = [];
+  const added = setEqualsFilter(filters, 'segment', 'startup', 'filter_a');
+  assert.deepEqual(added, [{ id: 'filter_a', column: 'segment', operator: 'equals', value: 'startup' }]);
+  const identical = setEqualsFilter(added, 'segment', 'Startup', 'filter_b');
+  assert.equal(identical, added);
+  const replaced = setEqualsFilter(added, 'segment', 'enterprise', 'filter_c');
+  assert.deepEqual(replaced, [{ id: 'filter_a', column: 'segment', operator: 'equals', value: 'enterprise' }]);
+  const withContains: DashboardFilter[] = [
+    { id: 'contains', column: 'channel', operator: 'contains', value: 'org' },
+    { id: 'equals', column: 'segment', operator: 'equals', value: 'startup' },
+  ];
+  assert.deepEqual(
+    setEqualsFilter(withContains, 'segment', 'midmarket', 'filter_d'),
+    [
+      { id: 'contains', column: 'channel', operator: 'contains', value: 'org' },
+      { id: 'equals', column: 'segment', operator: 'equals', value: 'midmarket' },
+    ],
+  );
+});
+
+test('follow-up questions include widget-grounded chef prompts', () => {
+  const schema: SchemaColumn[] = [
+    { name: 'date', type: 'date', stat: 'dates', unique: 3, asPercent: false },
+    { name: 'segment', type: 'category', stat: '3 unique', unique: 3, asPercent: false },
+    { name: 'revenue', type: 'number', stat: 'values', unique: 3, asPercent: false },
+    { name: 'orders', type: 'number', stat: 'values', unique: 3, asPercent: false },
+  ];
+  const recipe: DashboardRecipe = {
+    title: 'Ops',
+    widgets: [
+      { type: 'observations', span: 12, observations: ['Revenue is concentrated.'] },
+      { type: 'kpi', span: 3, label: 'Revenue', metric: 'revenue', value: '90', delta: null },
+      { type: 'kpi', span: 3, label: 'Orders', metric: 'orders', value: '12', delta: null },
+      { type: 'kpi', span: 3, label: 'Accounts', metric: 'orders', value: '3', delta: null },
+      { type: 'donut', span: 6, title: 'Revenue by segment', cat: 'segment', metric: 'revenue' },
+      { type: 'table', span: 12, title: 'Detail', limit: 10 },
+    ],
+  };
+  const questions = buildFollowUpQuestions(recipe, schema);
+  const byId = Object.fromEntries(questions.map(question => [question.id, question]));
+  assert.ok(questions.some(question => question.id === 'trend'));
+  assert.equal(byId['swap-donut'].prompt, 'Swap the Revenue by segment donut for a bar chart');
+  assert.equal(byId['sort-table'].prompt, 'Sort Detail by revenue descending, top 20');
+  assert.equal(byId['hero-kpi'].prompt, 'Promote Revenue to a full-width hero');
+  assert.equal(byId['hide-observations'].prompt, 'Hide the observations');
+  assert.deepEqual(
+    questions.filter(question => ['swap-donut', 'sort-table', 'hero-kpi', 'hide-observations'].includes(question.id)).map(question => question.id),
+    ['swap-donut', 'sort-table', 'hero-kpi', 'hide-observations'],
+  );
 });

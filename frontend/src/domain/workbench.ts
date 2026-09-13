@@ -75,6 +75,37 @@ export function filterOperators(column: SchemaColumn | undefined): FilterOperato
   return column ? OPERATOR_TYPES[column.type] : ['contains'];
 }
 
+const OPERATOR_LABELS: Record<FilterOperator, string> = {
+  equals: 'is',
+  contains: 'contains',
+  'at-least': '≥',
+  'at-most': '≤',
+  after: 'after',
+  before: 'before',
+};
+
+export function operatorLabel(operator: FilterOperator): string {
+  return OPERATOR_LABELS[operator];
+}
+
+export function setEqualsFilter(
+  filters: readonly DashboardFilter[],
+  column: string,
+  value: unknown,
+  id: string,
+): DashboardFilter[] {
+  const nextValue = comparableValue(value);
+  const existingIndex = filters.findIndex(filter => filter.column === column && filter.operator === 'equals');
+  if (existingIndex >= 0) {
+    const existing = filters[existingIndex];
+    if (comparableValue(existing.value).toLocaleLowerCase() === nextValue.toLocaleLowerCase()) {
+      return filters as DashboardFilter[];
+    }
+    return filters.map((filter, index) => (index === existingIndex ? { ...filter, value: nextValue } : filter));
+  }
+  return [...filters, { id, column, operator: 'equals', value: nextValue }];
+}
+
 function comparableValue(value: unknown): string {
   if (value === null || value === undefined) return '';
   if (typeof value === 'object') return JSON.stringify(value);
@@ -302,7 +333,41 @@ export function buildFollowUpQuestions(
       reason: 'The dashboard already includes row-level detail.',
     });
   }
-  return questions.slice(0, 4);
+  const donut = recipe.widgets.find(widget => widget.type === 'donut');
+  if (donut) {
+    questions.push({
+      id: 'swap-donut',
+      label: `Swap the ${donut.title} donut for a bar chart`,
+      prompt: `Swap the ${donut.title} donut for a bar chart`,
+      reason: 'The dashboard already has a donut that can be compared as bars.',
+    });
+  }
+  if (table && primary) {
+    questions.push({
+      id: 'sort-table',
+      label: `Sort ${table.title} by ${primary.name} descending, top 20`,
+      prompt: `Sort ${table.title} by ${primary.name} descending, top 20`,
+      reason: 'The table can highlight the largest rows.',
+    });
+  }
+  const kpis = recipe.widgets.filter((widget): widget is KpiWidget => widget.type === 'kpi');
+  if (kpis.length >= 3) {
+    questions.push({
+      id: 'hero-kpi',
+      label: `Promote ${kpis[0].label} to a full-width hero`,
+      prompt: `Promote ${kpis[0].label} to a full-width hero`,
+      reason: 'Several KPIs are on the plate; one can lead.',
+    });
+  }
+  if (recipe.widgets.some(widget => widget.type === 'observations')) {
+    questions.push({
+      id: 'hide-observations',
+      label: 'Hide the observations',
+      prompt: 'Hide the observations',
+      reason: 'The tasting notes can be hidden without changing the metrics.',
+    });
+  }
+  return questions;
 }
 
 export function kpiGoalsFromRecipe(recipe: DashboardRecipe): KpiWidget[] {
