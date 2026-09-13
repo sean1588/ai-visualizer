@@ -94,6 +94,16 @@ const AGGREGATE_PLAN = {
   ],
 };
 
+const CROSS_FILTER_PLAN = {
+  title: "Segment Revenue",
+  widgets: [
+    { type: "kpi", span: 3, title: "Total Revenue", fields: { metric: "revenue", aggregate: "sum" } },
+    { type: "bar", span: 6, title: "Revenue by Segment", fields: { x: "segment", y: "revenue" } },
+    { type: "countbar", span: 6, title: "Rows by Channel", fields: { cat: "channel" } },
+    { type: "table", span: 12, title: "Rows", fields: { limit: 10 } },
+  ],
+};
+
 const WORKBENCH_ROWS = [
   { date: "2026-01-01", segment: "Free", revenue: 10, orders: 2, customer_email: "ada@example.com" },
   { date: "2026-02-01", segment: "Pro", revenue: 20, orders: 4, customer_email: "lin@example.com" },
@@ -665,14 +675,17 @@ test("chart points and legends open the contributing-row inspector", async () =>
 
 test("clicking a chart value focuses the dashboard and Chef suggestions stay schema-aware", async () => {
   await withPage(async page => {
-    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, AGGREGATE_PLAN);
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, CROSS_FILTER_PLAN);
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
     await page.locator("#paste").fill(JSON.stringify(SEGMENT_REVENUE, null, 2));
     await page.locator("#render-btn").click();
     await page.waitForSelector("#chef-fab.is-visible");
 
     const unfocusedKpi = await page.locator(".w-kpi .value").first().innerText();
-    await page.locator('.w-chart rect.chart-hit[data-inspect-value="startup"]').click();
+    const segmentChart = page.locator(".w-chart").filter({ hasText: "Revenue by Segment" });
+    const startupBar = segmentChart.locator('rect.chart-hit[data-inspect-value="startup"]');
+    const enterpriseBar = segmentChart.locator('rect.chart-hit[data-inspect-value="enterprise"]');
+    await startupBar.click();
     await page.waitForSelector("#inspector-dialog[open]");
     assert.match(await page.locator("#focus-on-value").innerText(), /Focus dashboard on Segment = startup/i);
     await page.locator("#focus-on-value").click();
@@ -685,23 +698,23 @@ test("clicking a chart value focuses the dashboard and Chef suggestions stay sch
     assert.match(focusedKpi, /\$20k/i);
     assert.deepEqual(await page.evaluate(() => window.__mise.state.filters.map(filter => filter.value)), ["startup"]);
 
-    await page.locator(".w-chart rect.chart-hit").first().click();
-    await page.waitForSelector("#inspector-dialog[open]");
-    await page.locator("#focus-on-value").click();
-    assert.equal(await page.locator(".focus-chip").count(), 1);
-    assert.deepEqual(await page.evaluate(() => window.__mise.state.filters.map(filter => filter.value)), ["startup"]);
+    assert.equal(await segmentHits(page).count(), 3);
+    assert.equal(await startupBar.getAttribute("aria-pressed"), "true");
+    assert.equal(await startupBar.getAttribute("data-selected"), "true");
+    assert.equal(await segmentChart.locator("rect.chart-hit.is-dimmed").count(), 2);
+    assert.equal(await channelHits(page).count(), 2);
 
-    await page.locator(".focus-chip-remove").click();
-    await page.waitForFunction(() => document.querySelectorAll(".w-chart rect.chart-hit").length >= 3);
-    await page.locator('.w-chart rect.chart-hit[data-inspect-value="enterprise"]').click();
-    await page.waitForSelector("#inspector-dialog[open]");
-    assert.match(await page.locator("#focus-on-value").innerText(), /enterprise/i);
-    await page.locator("#focus-on-value").click();
+    await enterpriseBar.click();
+    assert.equal(await page.locator("#inspector-dialog[open]").count(), 0);
     await page.waitForFunction(() => document.querySelector("#focus-summary")?.textContent?.includes("enterprise"));
     assert.equal(await page.locator(".focus-chip").count(), 1);
-    assert.match(await page.locator("#focus-summary").innerText(), /Focused · 1 of 5 rows/i);
+    assert.match(await page.locator(".focus-chip-body").innerText(), /Segment is enterprise/i);
     assert.match(await page.locator(".w-kpi .value").first().innerText(), /\$60k/i);
     assert.deepEqual(await page.evaluate(() => window.__mise.state.filters.map(filter => filter.value)), ["enterprise"]);
+    assert.equal(await channelHits(page).count(), 1);
+    await page.waitForFunction(() => document.getElementById("status-pill")?.textContent?.includes("Focused on enterprise"));
+    assert.equal(await enterpriseBar.getAttribute("data-selected"), "true");
+    assert.equal(await segmentChart.locator("rect.chart-hit.is-dimmed").count(), 2);
 
     await page.locator("#presentation-mode").click();
     await page.waitForFunction(() => document.body.classList.contains("presentation-mode"));
@@ -709,6 +722,8 @@ test("clicking a chart value focuses the dashboard and Chef suggestions stay sch
     assert.equal(await page.locator("#focus-clear").isVisible(), false);
     assert.equal(await page.locator(".focus-chip-remove").isVisible(), false);
     assert.equal(await page.locator(".focus-chip-body").isVisible(), true);
+    assert.equal(await enterpriseBar.getAttribute("data-selected"), "true");
+    assert.equal(await segmentChart.locator("rect.chart-hit.is-dimmed").count(), 2);
     await page.locator("#exit-presentation").click();
     await page.waitForFunction(() => !document.body.classList.contains("presentation-mode"));
 
@@ -717,12 +732,17 @@ test("clicking a chart value focuses the dashboard and Chef suggestions stay sch
     assert.match(await page.locator("#analysis-workbench button.active").innerText(), /Focus/i);
     await closeWorkbench(page);
 
-    await page.locator(".focus-chip-remove").click();
+    await enterpriseBar.click();
     await page.waitForFunction(() => !document.querySelector("#focus-summary"));
+    assert.equal(await channelHits(page).count(), 3);
 
-    await page.locator('.w-chart rect.chart-hit[data-inspect-value="startup"]').click();
+    await startupBar.click();
+    await page.waitForSelector("#inspector-dialog[open]");
     await page.locator("#focus-on-value").click();
     await page.waitForSelector("#focus-summary");
+    await channelHits(page).first().click();
+    await page.waitForSelector("#inspector-dialog[open]");
+    await page.locator("#inspector-close").click();
     await page.locator("#focus-clear").click();
     await page.waitForFunction(() => !document.querySelector("#focus-summary"));
   });
@@ -1719,6 +1739,14 @@ async function widgetCard(page, fingerprintOrIndex) {
   if (typeof fingerprintOrIndex === "number") return page.locator("#dash-grid > [data-fp]").nth(fingerprintOrIndex);
   if (typeof fingerprintOrIndex === "string" && /^[.#[]/.test(fingerprintOrIndex)) return page.locator(fingerprintOrIndex).first();
   return page.locator(`[data-fp="${fingerprintOrIndex}"]`);
+}
+
+function segmentHits(page) {
+  return page.locator(".w-chart").filter({ hasText: "Revenue by Segment" }).locator("rect.chart-hit");
+}
+
+function channelHits(page) {
+  return page.locator("[data-fp='countbar:channel'] rect.chart-hit");
 }
 
 async function clickWidgetMenuItem(page, name) {
