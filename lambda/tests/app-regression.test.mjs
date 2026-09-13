@@ -550,7 +550,7 @@ test("mobile dashboard fold uses a bottom action bar without horizontal overflow
     await page.waitForSelector("#mobile-analyze");
 
     await openMobileSheet(page, "#mobile-export");
-    const exportSheet = await page.locator("details.menu-sheet[open] .menu-list").innerText();
+    const exportSheet = await page.locator("details.menu-sheet[open] .menu-list").textContent();
     assert.match(exportSheet, /Export PNG/);
     assert.match(exportSheet, /Interactive HTML/);
     assert.match(exportSheet, /Recipe JSON/);
@@ -559,7 +559,7 @@ test("mobile dashboard fold uses a bottom action bar without horizontal overflow
     await page.waitForFunction(() => !document.querySelector("details.menu-sheet[open]"));
 
     await openMobileSheet(page, "#mobile-more");
-    const moreSheet = await page.locator("details.menu-sheet[open] .menu-list").innerText();
+    const moreSheet = await page.locator("details.menu-sheet[open] .menu-list").textContent();
     assert.match(moreSheet, /Replace data/);
     assert.match(moreSheet, /Present/);
     await page.getByRole("menuitem", { name: /Present/ }).click();
