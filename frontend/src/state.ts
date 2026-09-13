@@ -19,6 +19,7 @@ import type { RecentDashboard } from './storage';
 export type Stage = 'empty' | 'loading' | 'dash';
 export type LoadingStep = 'parse' | 'infer' | 'layout' | 'render';
 export type StepStatus = 'pending' | 'active' | 'done';
+export type WorkbenchTab = 'focus' | 'goals' | 'discover' | 'brief' | 'recipe' | 'notes';
 
 export interface ChefMessage {
   role: 'user' | 'chef' | 'error';
@@ -74,8 +75,6 @@ export interface AppState {
   assumptionsWidgetIndex: number | null;
   inspector: InspectorState | null;
   healthOpen: boolean;
-  briefOpen: boolean;
-  recipeInspectorOpen: boolean;
   alertsOpen: boolean;
   alerts: ThresholdAlert[];
   theme: DashboardTheme;
@@ -84,6 +83,8 @@ export interface AppState {
   kpiGoals: KpiGoal[];
   dashboardNotes: string;
   workbenchOpen: boolean;
+  workbenchTab: WorkbenchTab;
+  paletteOpen: boolean;
   presentationMode: boolean;
 }
 
@@ -129,8 +130,6 @@ export function createInitialState(recents: RecentDashboard[] = []): AppState {
     assumptionsWidgetIndex: null,
     inspector: null,
     healthOpen: false,
-    briefOpen: false,
-    recipeInspectorOpen: false,
     alertsOpen: false,
     alerts: [],
     theme: 'mise',
@@ -139,6 +138,8 @@ export function createInitialState(recents: RecentDashboard[] = []): AppState {
     kpiGoals: [],
     dashboardNotes: '',
     workbenchOpen: false,
+    workbenchTab: 'focus',
+    paletteOpen: false,
     presentationMode: false,
   };
 }

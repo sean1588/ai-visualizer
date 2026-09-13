@@ -174,8 +174,13 @@
   .dash-share-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
   .dash-share-actions .btn { padding: 5px 9px; font-size: 9px; }
   .dash-share-actions .btn.has-alert { border-color: var(--accent); color: var(--accent); background: rgba(138,51,36,.06); }
-  .theme-picker { display: flex; align-items: center; gap: 6px; padding-left: 4px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .05em; text-transform: uppercase; color: var(--fg-mute); }
-  .theme-picker select { padding: 4px 6px; border: 1px solid var(--rule-soft); background: var(--bg-elev); color: var(--fg); font-family: var(--font-mono); font-size: 9px; }
+  .theme-picker { display: grid; gap: 5px; width: min(100%, 280px); }
+  .theme-picker > span { font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-mute); }
+  .theme-picker select { width: 100%; padding: 8px; border: 1px solid var(--rule-soft); background: var(--bg-elev); color: var(--fg); font: 12px var(--font-body); }
+  .notes-backup-grid .theme-article { grid-column: 1 / -1; }
+  .insight-panel > div { display: grid; gap: 14px; }
+  .insight-panel .recipe-source, .insight-panel .recipe-transformations, .insight-panel .recipe-schema { margin-bottom: 0; }
+  .insight-panel .brief-summary { margin: 0; }
   .recipe-history { display: flex; align-items: flex-start; gap: 7px; margin-top: 8px; }
   .recipe-history > .btn { padding: 5px 9px; font-size: 9px; }
   .recipe-history > details { position: relative; }

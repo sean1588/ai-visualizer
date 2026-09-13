@@ -61,7 +61,7 @@ import AnalysisWorkbench from './AnalysisWorkbench';
 import DataHealthDialog from './DataHealth';
 import ExampleGallery from './ExampleGallery';
 import { EXAMPLE_PLATES, type ExamplePlate } from './examples';
-import { AlertsDialog, ExecutiveBriefDialog, RecipeInspectorDialog } from './InsightsDialogs';
+import { AlertsDialog } from './InsightsDialogs';
 import { buildChefPrompt, buildPrompt } from './prompts';
 import { complete, fetchRemoteData } from './services';
 import { buildRecipeLink, buildStandaloneHtml, decodeRecipeFragment } from './sharing';
@@ -517,8 +517,6 @@ function App() {
           recipeHistoryIndex: -1,
           alerts: [],
           theme: 'mise',
-          briefOpen: false,
-          recipeInspectorOpen: false,
           alertsOpen: false,
           filters: [],
           savedViews: [],
@@ -1691,9 +1689,7 @@ function App() {
                 </div>
               )}
               <div className="dash-share-actions">
-                <button id="open-workbench" type="button" className="btn btn-primary" onClick={() => dispatch({ type: 'patch', value: { workbenchOpen: true } })}>Analysis workbench</button>
-                <button id="open-brief" type="button" className="btn btn-ghost" onClick={() => dispatch({ type: 'patch', value: { briefOpen: true } })}>Executive brief</button>
-                <button id="open-recipe-inspector" type="button" className="btn btn-ghost" onClick={() => dispatch({ type: 'patch', value: { recipeInspectorOpen: true } })}>Inspect recipe</button>
+                <button id="open-workbench" type="button" className="btn btn-primary" onClick={() => dispatch({ type: 'patch', value: { workbenchOpen: true, workbenchTab: 'focus' } })}>Analyze</button>
                 <button id="open-alerts" type="button" className={`btn btn-ghost ${triggeredAlerts ? 'has-alert' : ''}`} disabled={!hasHttpSource(state.dataSource)} title={hasHttpSource(state.dataSource) ? 'Configure thresholds evaluated after while-open refreshes' : 'Threshold alerts require a refreshable HTTP source'} onClick={() => dispatch({ type: 'patch', value: { alertsOpen: true } })}>Alerts · {triggeredAlerts || state.alerts.length}</button>
                 <button id="share-recipe-link" type="button" className="btn btn-ghost" onClick={() => void copyRecipeLink()}>Copy recipe link</button>
                 <button id="export-html-btn" type="button" className="btn btn-ghost" title="The exported file supports ?embed or #embed mode" onClick={exportStandalone}>Interactive HTML ↓</button>
@@ -1701,7 +1697,6 @@ function App() {
                   presentationReturnFocus.current = event.currentTarget;
                   dispatch({ type: 'patch', value: { presentationMode: true } });
                 }}>Present</button>
-                <label className="theme-picker"><span>Theme</span><select id="theme-picker" value={state.theme} onChange={event => setDashboardTheme(event.target.value as DashboardTheme)}><option value="mise">Mise</option><option value="ink">Ink</option><option value="ocean">Ocean</option><option value="plum">Plum</option><option value="marketing">Marketing site</option></select></label>
               </div>
               <div className="recipe-history">
                 <button id="recipe-undo" type="button" className="btn btn-ghost" disabled={state.recipeHistoryIndex <= 0} onClick={() => navigateRecipeHistory(-1)}>↶ Undo</button>
@@ -1754,26 +1749,6 @@ function App() {
         onCorrect={issue => updateHealthIssue(issue, true)}
         onIgnore={issue => updateHealthIssue(issue, false)}
       />
-      <ExecutiveBriefDialog
-        open={state.briefOpen}
-        brief={executiveBrief}
-        onClose={() => dispatch({ type: 'patch', value: { briefOpen: false } })}
-        onInspect={widget => {
-          dispatch({ type: 'patch', value: { briefOpen: false } });
-          openInspector(widget, null);
-        }}
-        onCopy={markdown => void copyExecutiveBrief(markdown)}
-      />
-      <RecipeInspectorDialog
-        open={state.recipeInspectorOpen}
-        recipe={state.recipe}
-        schema={state.schema}
-        dataSource={state.dataSource}
-        parseHealth={state.parseHealth}
-        schemaOverrides={state.schemaOverrides}
-        excludeOutliers={state.excludeOutliers}
-        onClose={() => dispatch({ type: 'patch', value: { recipeInspectorOpen: false } })}
-      />
       <AlertsDialog
         open={state.alertsOpen}
         recipe={state.recipe}
@@ -1786,6 +1761,7 @@ function App() {
       />
       <AnalysisWorkbench
         open={state.workbenchOpen}
+        initialTab={state.workbenchTab}
         rows={focusedRows}
         allRows={state.rows}
         schema={state.schema}
@@ -1795,6 +1771,11 @@ function App() {
         kpiGoals={state.kpiGoals}
         dashboardNotes={state.dashboardNotes}
         excludeOutliers={state.excludeOutliers}
+        theme={state.theme}
+        brief={executiveBrief}
+        dataSource={state.dataSource}
+        parseHealth={state.parseHealth}
+        schemaOverrides={state.schemaOverrides}
         onClose={() => dispatch({ type: 'patch', value: { workbenchOpen: false } })}
         onFilters={filters => updateWorkbench({ filters })}
         onSavedViews={savedViews => updateWorkbench({ savedViews })}
@@ -1810,6 +1791,12 @@ function App() {
         }}
         onExport={exportDashboardBundle}
         onImport={importDashboardBundle}
+        onTheme={setDashboardTheme}
+        onInspectBrief={widget => {
+          dispatch({ type: 'patch', value: { workbenchOpen: false } });
+          openInspector(widget, null);
+        }}
+        onCopyBrief={markdown => void copyExecutiveBrief(markdown)}
       />
     </>
   );
