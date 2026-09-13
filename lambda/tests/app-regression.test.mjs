@@ -261,10 +261,10 @@ test("sample dashboard renders and exports a PNG", async () => {
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
     await page.getByText("SAAS METRICS").click();
     await page.waitForSelector("#chef-fab.is-visible");
-    await page.locator("#theme-picker").selectOption("marketing");
+    await setTheme(page, "marketing");
 
     const downloadPromise = page.waitForEvent("download");
-    await page.locator("#export-btn").click();
+    await clickMenuItem(page, "#export-menu", "#export-btn");
     const download = await downloadPromise;
 
     assert.match(download.suggestedFilename(), /\.png$/);
@@ -274,6 +274,75 @@ test("sample dashboard renders and exports a PNG", async () => {
     assert.match(text, /MRR Trend/);
     assert.doesNotMatch(text, /undefined/);
   }, { allowConsole: /AI response did not validate, falling back/ });
+});
+
+test("action hierarchy keeps the landing header quiet and the palette reaches every action", async () => {
+  await withPage(async page => {
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, AGGREGATE_PLAN);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+
+    assert.equal(await page.locator(".top-right").count(), 0, "landing header has no action cluster");
+    assert.equal(await page.locator("header.top button").count(), 1, "only the wordmark is interactive on landing");
+    assert.equal(await page.locator("#status-pill").count(), 0);
+    assert.equal(await page.locator("#command-palette[open]").count(), 0);
+    await page.keyboard.press("Control+k");
+    assert.equal(await page.locator("#command-palette[open]").count(), 0, "palette is dashboard-only");
+
+    await page.locator("#paste").fill(JSON.stringify(SEGMENT_REVENUE, null, 2));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    const header = await page.locator(".top-right").innerText();
+    assert.match(header, /Saved in this browser/i);
+    assert.match(header, /Data/i);
+    assert.match(header, /Export/i);
+    assert.match(header, /Present/i);
+    assert.match(header, /(⌘|Ctrl\+)K/);
+    assert.equal(await page.locator(".top-right .btn:visible").count(), 3, "pill · Data ▾ · Export ▾ · Present");
+    assert.equal(await page.locator("#recipe-undo").count(), 0);
+    assert.equal(await page.locator(".dash-head .btn").count(), 1, "the head keeps a single Analyze button");
+    assert.equal(await page.locator("#open-workbench").textContent(), "Analyze");
+    assert.equal(await page.locator(".dash-head select").count(), 0);
+
+    await page.locator("#data-menu").click();
+    assert.ok(await page.locator("#replace-data-btn").isVisible());
+    assert.ok(await page.locator("#action-data-health").isVisible());
+    assert.equal(await page.locator("#refresh-btn").count(), 0, "Refresh data is absent, not disabled, for local data");
+    assert.equal(await page.locator("#open-alerts").count(), 0, "Alerts is absent, not disabled, for local data");
+    assert.equal(await page.locator(".menu-list button:disabled").count(), 0);
+    await page.locator("#export-menu").click();
+    assert.equal(await page.locator("details.menu[open]").count(), 1, "only one menu is open at a time");
+    assert.ok(await page.locator("#export-btn").isVisible());
+    assert.ok(await page.locator("#action-backup").isVisible());
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("details.menu[open]").count(), 0);
+    assert.equal(await page.evaluate(() => document.activeElement?.id), "export-menu");
+
+    await page.keyboard.press("Control+k");
+    await page.waitForSelector("#command-palette[open]");
+    assert.equal(await page.locator("#command-palette").getAttribute("aria-labelledby"), "command-palette-title");
+    await page.waitForFunction(() => document.activeElement?.id === "command-input");
+    const paletteText = await page.locator("#command-list").innerText();
+    assert.match(paletteText, /Executive brief/);
+    assert.match(paletteText, /Notes & backup/);
+    assert.match(paletteText, /Talk to the Chef/);
+    assert.doesNotMatch(paletteText, /Refresh data|Undo/);
+    await page.locator("#command-input").fill("png");
+    assert.equal(await page.locator(".command-item").count(), 1);
+    const downloadPromise = page.waitForEvent("download");
+    await page.keyboard.press("Enter");
+    const download = await downloadPromise;
+    assert.match(download.suggestedFilename(), /\.png$/);
+    await page.waitForFunction(() => !document.querySelector("#command-palette")?.hasAttribute("open"));
+
+    await page.keyboard.press("/");
+    await page.waitForSelector("#chef-panel.is-open");
+    await page.waitForFunction(() => document.activeElement?.id === "chef-input");
+    await page.keyboard.type("/ is not typed into the chef");
+    assert.equal(await page.locator("#chef-input").inputValue(), "/ is not typed into the chef");
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("#chef-panel")?.classList.contains("is-open"));
+  });
 });
 
 test("completed-plate gallery teaches prompts and direct edits share undo history", async () => {
@@ -288,6 +357,8 @@ test("completed-plate gallery teaches prompts and direct edits share undo histor
     await page.locator('[data-example="saas"]').click();
     await page.waitForSelector("#chef-fab.is-visible");
     assert.equal(requests.length, 0);
+    assert.equal(await page.locator("#recipe-undo").count(), 0, "undo is hidden until there is history");
+    assert.equal(await page.locator(".recipe-history").count(), 0);
 
     await page.locator(".w-kpi .widget-rationale summary").first().click();
     assert.match(await page.locator(".w-kpi .widget-rationale p").first().innerText(), /recurring revenue is the primary operating metric/i);
@@ -296,10 +367,17 @@ test("completed-plate gallery teaches prompts and direct edits share undo histor
     await page.getByRole("button", { name: "Move later" }).first().click();
     assert.equal(await page.locator(".w-kpi .label").first().innerText(), "NEW CUSTOMERS");
     assert.match(await page.locator(".recipe-history").innerText(), /2 revisions/i);
+    assert.equal(await page.locator("#recipe-redo").isEnabled(), false);
 
     await page.locator("#recipe-undo").click();
     assert.equal(await page.locator(".w-kpi .label").first().innerText(), "CURRENT MRR");
+    assert.equal(await page.locator("#recipe-undo").isEnabled(), false);
     await page.locator("#recipe-redo").click();
+    assert.equal(await page.locator(".w-kpi .label").first().innerText(), "NEW CUSTOMERS");
+
+    await page.keyboard.press("Control+z");
+    assert.equal(await page.locator(".w-kpi .label").first().innerText(), "CURRENT MRR");
+    await page.keyboard.press("Shift+Control+z");
     assert.equal(await page.locator(".w-kpi .label").first().innerText(), "NEW CUSTOMERS");
 
     await page.locator(".w-kpi .widget-edit summary").first().click();
@@ -454,6 +532,10 @@ test("coarse-pointer controls meet the 44px touch target baseline", async () => 
     await page.getByText("SAAS METRICS").click();
     await page.waitForSelector("#chef-fab.is-visible");
     assert.ok(await page.locator(".assumption-chip").first().evaluate(element => element.getBoundingClientRect().height) >= 44);
+    assert.ok(await page.locator("#data-menu").evaluate(element => element.getBoundingClientRect().height) >= 44);
+    await page.locator("#data-menu").click();
+    assert.ok(await page.locator("#replace-data-btn").evaluate(element => element.getBoundingClientRect().height) >= 44);
+    await page.keyboard.press("Escape");
     await page.locator("#open-workbench").click();
     assert.ok(await page.locator(".workbench-tabs button").first().evaluate(element => element.getBoundingClientRect().height) >= 44);
     assert.ok(await page.locator("#focus-filter-form select").first().evaluate(element => element.getBoundingClientRect().height) >= 44);
@@ -616,7 +698,7 @@ test("product events contain only allowlisted metadata", async () => {
     await page.locator(".w-chart .chart-hit").first().click();
     await page.locator("#inspector-close").click();
     const downloadPromise = page.waitForEvent("download");
-    await page.locator("#export-recipe-btn").click();
+    await clickMenuItem(page, "#export-menu", "#export-recipe-btn");
     await downloadPromise;
     await page.waitForFunction(() => window.__mise.state.stage === "dash");
     await page.waitForTimeout(100);
@@ -686,7 +768,7 @@ test("recipe links reapply without AI and standalone HTML keeps chart inspection
     await page.locator("#render-btn").click();
     await page.waitForSelector("#chef-fab.is-visible");
 
-    await page.locator("#share-recipe-link").click();
+    await clickMenuItem(page, "#export-menu", "#share-recipe-link");
     const link = await page.evaluate(() => navigator.clipboard.readText());
     assert.match(link, /#recipe=/);
     assert.doesNotMatch(link, /example\.test|SEGMENT_REVENUE/);
@@ -699,7 +781,7 @@ test("recipe links reapply without AI and standalone HTML keeps chart inspection
     assert.equal(cookCalls, 1);
 
     const downloadPromise = page.waitForEvent("download");
-    await page.locator("#export-html-btn").click();
+    await clickMenuItem(page, "#export-menu", "#export-html-btn");
     const download = await downloadPromise;
     assert.match(download.suggestedFilename(), /\.html$/);
     const path = await download.path();
@@ -718,27 +800,31 @@ test("recipe links reapply without AI and standalone HTML keeps chart inspection
   });
 });
 
-test("brief, recipe inspector, and themes remain traceable and local", async () => {
+test("workbench Brief and Recipe tabs and the Notes theme picker remain traceable and local", async () => {
   await withPage(async page => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE_URL });
     await mockInference(page);
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
     await page.getByText("SAAS METRICS").click();
     await page.waitForSelector("#chef-fab.is-visible");
+    assert.equal(await page.locator("#open-brief, #open-recipe-inspector, .dash-head #theme-picker").count(), 0);
 
-    await page.locator("#theme-picker").selectOption("marketing");
+    await setTheme(page, "marketing");
     assert.equal(await page.locator("body").getAttribute("data-theme"), "marketing");
 
-    await page.locator("#open-recipe-inspector").click();
-    let text = await page.locator("#recipe-inspector-dialog").innerText();
+    const workbench = await openWorkbenchTab(page, "Recipe");
+    assert.equal(await workbench.locator(".workbench-tabs button").count(), 6);
+    await page.waitForSelector("#recipe-inspector");
+    let text = await page.locator("#recipe-inspector").innerText();
     assert.match(text, /Browser-local data/i);
     assert.match(text, /Last-point outlier exclusion enabled/i);
     assert.match(text, /Current MRR/i);
     assert.match(text, /primary operating metric/i);
-    await page.locator("#recipe-inspector-dialog .dialog-close").click();
+    assert.equal(await page.locator("#executive-brief").count(), 0);
 
-    await page.locator("#open-brief").click();
-    text = await page.locator("#executive-brief-dialog").innerText();
+    await openWorkbenchTab(page, "Brief");
+    await page.waitForSelector("#executive-brief");
+    text = await page.locator("#executive-brief").innerText();
     assert.match(text, /Current MRR is \$102\.4k/i);
     assert.match(text, /supporting rows/i);
     await page.locator("#copy-brief").click();
@@ -746,11 +832,21 @@ test("brief, recipe inspector, and themes remain traceable and local", async () 
     assert.match(markdown, /# SaaS Growth Review — executive brief/);
     assert.match(markdown, /#mise-widget-/);
     await page.getByRole("button", { name: /View 12 supporting rows/i }).first().click();
+    await page.waitForFunction(() => !document.querySelector("#analysis-workbench")?.hasAttribute("open"));
     assert.match(await page.locator("#inspector-title").innerText(), /Current MRR/i);
     await page.locator("#inspector-close").click();
 
+    await page.keyboard.press("Control+k");
+    await page.waitForSelector("#command-palette[open]");
+    await page.locator("#command-input").fill("executive");
+    await page.keyboard.press("Enter");
+    await page.waitForSelector("#analysis-workbench[open]");
+    await page.waitForSelector("#executive-brief");
+    await closeWorkbench(page);
+
     await page.reload({ waitUntil: "networkidle" });
     await page.getByText("SaaS Growth Review").first().click();
+    await openWorkbenchTab(page, "Notes & backup");
     assert.equal(await page.locator("#theme-picker").inputValue(), "marketing");
   });
 });
@@ -876,8 +972,16 @@ test("analysis workbench keeps ten browser-local enhancements cohesive and persi
     await page.waitForFunction(() => document.activeElement?.id === "exit-presentation");
     assert.equal(await page.locator(".w-actions").first().isVisible(), false);
     assert.equal(await page.locator("#data-health-btn").isVisible(), false);
+    assert.equal(await page.locator("#data-menu").isVisible(), false);
+    assert.equal(await page.locator("#export-menu").isVisible(), false);
+    assert.equal(await page.locator("#open-workbench").isVisible(), false);
+    assert.equal(await page.locator("#status-pill").isVisible(), false);
     await page.locator("#exit-presentation").click();
     await page.waitForFunction(() => document.activeElement?.id === "presentation-mode");
+    await page.keyboard.press("p");
+    await page.waitForFunction(() => document.body.classList.contains("presentation-mode"));
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.body.classList.contains("presentation-mode"));
 
     await page.reload({ waitUntil: "networkidle" });
     await page.getByText("Segment Workbench").first().click();
@@ -916,15 +1020,16 @@ test("public source conveniences and while-open thresholds evaluate after refres
     await page.waitForSelector("#chef-fab.is-visible");
     assert.equal(requestedUrl, "https://docs.google.com/spreadsheets/d/sheet-id/export?format=csv&gid=42");
 
-    await page.locator("#open-alerts").click();
+    await clickMenuItem(page, "#data-menu", "#open-alerts");
     await page.locator('#alert-form select[name="widget"]').selectOption({ label: "Total Revenue" });
     await page.locator('#alert-form input[name="threshold"]').fill("125000");
     await page.locator('#alert-form button[type="submit"]').click();
     assert.match(await page.locator("#alert-list").innerText(), /Watching/i);
     await page.locator("#alerts-dialog .dialog-close").click();
 
-    await page.locator("#refresh-btn").click();
+    await clickMenuItem(page, "#data-menu", "#refresh-btn");
     await page.waitForFunction(() => document.getElementById("status-pill")?.innerText.includes("THRESHOLD ALERT"));
+    await page.locator("#data-menu").click();
     assert.match(await page.locator("#open-alerts").innerText(), /Alerts · 1/i);
     await page.locator("#open-alerts").click();
     assert.match(await page.locator("#alert-list").innerText(), /Triggered/i);
@@ -994,11 +1099,11 @@ test("HTTP source dashboards save a refreshable URL and refresh without re-plann
     await page.waitForSelector("#chef-fab.is-visible");
 
     let text = await page.locator("body").innerText();
-    assert.match(text, /HTTP · refreshable/i);
+    assert.match(await page.locator("#status-pill").innerText(), /Saved in this browser · just now/i);
     assert.match(text, /120k/);
     assert.equal(cookCalls, 1);
 
-    await page.locator("#refresh-btn").click();
+    await clickMenuItem(page, "#data-menu", "#refresh-btn");
     await page.waitForFunction(() => document.body.innerText.includes("150k"));
 
     text = await page.locator("body").innerText();
@@ -1021,6 +1126,7 @@ test("HTTP source dashboards save a refreshable URL and refresh without re-plann
     await page.reload({ waitUntil: "networkidle" });
     await page.getByText("Segment Revenue").first().click();
     await page.waitForSelector("#chef-fab.is-visible");
+    assert.equal(await page.locator("#refresh-btn").count(), 1);
     assert.equal(await page.locator("#refresh-btn").isEnabled(), true);
     assert.equal(await page.locator("#refresh-cadence").inputValue(), "5");
     assert.match(await page.locator("#dataset-comparison").innerText(), /Since previous data/i);
@@ -1062,7 +1168,12 @@ test("local dashboards replace data against the same recipe and report schema dr
     assert.match(text, /\+\$60k/);
     assert.match(text, /vs previous dataset/i);
     assert.equal(cookCalls, 1);
-    assert.equal(await page.locator("#refresh-btn").isEnabled(), false);
+    await page.locator("#data-menu").click();
+    assert.equal(await page.locator("#replace-data-btn").isVisible(), true);
+    assert.equal(await page.locator("#refresh-btn").count(), 0, "local datasets do not show Refresh data");
+    assert.equal(await page.locator("#open-alerts").count(), 0, "local datasets do not show Alerts");
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("#data-menu")?.closest("details")?.open);
 
     await page.locator("#open-workbench").click();
     const workbench = page.locator("#analysis-workbench");
@@ -1073,9 +1184,10 @@ test("local dashboards replace data against the same recipe and report schema dr
     await workbench.locator(".dialog-close").click();
     assert.equal(await page.locator(".dataset-delta").count(), 0);
     assert.equal(await page.locator("#dataset-comparison").count(), 0);
-    await page.locator("#open-brief").click();
-    assert.doesNotMatch(await page.locator("#executive-brief-dialog").innerText(), /from the previous dataset/i);
-    await page.locator("#executive-brief-dialog .dialog-close").click();
+    await openWorkbenchTab(page, "Brief");
+    await page.waitForSelector("#executive-brief");
+    assert.doesNotMatch(await page.locator("#executive-brief").innerText(), /from the previous dataset/i);
+    await closeWorkbench(page);
 
     await page.reload({ waitUntil: "networkidle" });
     await page.getByText("Segment Revenue").first().click();
@@ -1114,13 +1226,14 @@ test("HTTP refresh failures remain visible without replacing good rows", async (
     await page.locator("#http-url").fill("https://example.test/revenue.json");
     await page.locator("#fetch-url-btn").click();
     await page.waitForSelector("#chef-fab.is-visible");
-    await page.locator("#refresh-btn").click();
+    await clickMenuItem(page, "#data-menu", "#refresh-btn");
     await page.waitForSelector("#refresh-error");
 
     assert.match(await page.locator("#refresh-error").innerText(), /upstream_failed.*source unavailable/i);
     assert.match(await page.locator("body").innerText(), /120k/);
     await page.waitForTimeout(2300);
-    assert.match(await page.locator("#status-pill").innerText(), /HTTP · refresh error/i);
+    assert.match(await page.locator("#status-pill").innerText(), /Refresh failed/i);
+    assert.equal(await page.locator("#status-pill .pill-dot.active").count(), 0);
   }, { allowConsole: /\[refresh\] failed|Failed to load resource/ });
 });
 
@@ -1157,17 +1270,18 @@ test("applying an HTTP recipe to pasted CSV does not advertise refresh", async (
 
     const chrome = await page.evaluate(() => ({
       pill: document.getElementById("status-pill").innerText,
-      refreshDisabled: document.getElementById("refresh-btn").disabled,
+      refreshPresent: !!document.getElementById("refresh-btn"),
       hasHttp: window.__mise.hasHttpSource(),
       liveType: window.__mise.state.dataSource?.type || null,
     }));
 
-    assert.doesNotMatch(chrome.pill, /HTTP\s*·\s*refreshable/i);
-    assert.equal(chrome.refreshDisabled, true);
+    assert.match(chrome.pill, /Saved in this browser/i);
+    assert.equal(chrome.refreshPresent, false);
     assert.equal(chrome.hasHttp, false);
     assert.equal(chrome.liveType, null);
 
-    await page.locator("#refresh-btn").click({ force: true });
+    await page.locator("#data-menu").click();
+    assert.equal(await page.locator("#refresh-btn").count(), 0);
     await page.waitForTimeout(80);
     assert.equal(fetchCalls, 0);
   });
@@ -1268,7 +1382,7 @@ test("recipe download writes a file and re-imports against new data without re-p
     assert.equal(cookCalls, 1);
 
     const downloadPromise = page.waitForEvent("download");
-    await page.locator("#export-recipe-btn").click();
+    await clickMenuItem(page, "#export-menu", "#export-recipe-btn");
     const download = await downloadPromise;
     assert.match(download.suggestedFilename(), /\.recipe\.json$/);
     assert.match(download.suggestedFilename(), /\d{4}-/);
@@ -1298,11 +1412,11 @@ test("PNG exports use unique timestamps and surface encode failures", async () =
     await page.waitForSelector("#chef-fab.is-visible");
 
     const firstPromise = page.waitForEvent("download");
-    await page.locator("#export-btn").click();
+    await clickMenuItem(page, "#export-menu", "#export-btn");
     const first = await firstPromise;
 
     const secondPromise = page.waitForEvent("download");
-    await page.locator("#export-btn").click();
+    await clickMenuItem(page, "#export-menu", "#export-btn");
     const second = await secondPromise;
 
     assert.match(first.suggestedFilename(), /\.png$/);
@@ -1316,7 +1430,7 @@ test("PNG exports use unique timestamps and surface encode failures", async () =
         return canvas;
       };
     });
-    await page.locator("#export-btn").click();
+    await clickMenuItem(page, "#export-menu", "#export-btn");
     await page.waitForFunction(() => document.body.innerText.toLowerCase().includes("failed"));
   }, { allowConsole: /PNG export failed|PNG encode failed/ });
 });
@@ -1438,6 +1552,31 @@ test("compact numbers never print 1000B for just-under-a-trillion values", async
     assert.equal(formatted.negativeCurrency, "-$1.2k");
   });
 });
+
+async function clickMenuItem(page, menuId, itemSelector) {
+  await page.locator(menuId).click();
+  await page.waitForSelector(`${itemSelector}:visible`);
+  await page.locator(itemSelector).click();
+}
+
+async function openWorkbenchTab(page, label) {
+  const workbench = page.locator("#analysis-workbench");
+  if (!(await workbench.evaluate(element => element.open))) await page.locator("#open-workbench").click();
+  await page.waitForSelector("#analysis-workbench[open]");
+  await workbench.getByRole("button", { name: label, exact: true }).click();
+  return workbench;
+}
+
+async function closeWorkbench(page) {
+  await page.locator("#analysis-workbench .dialog-close").click();
+  await page.waitForFunction(() => !document.querySelector("#analysis-workbench")?.hasAttribute("open"));
+}
+
+async function setTheme(page, value) {
+  await openWorkbenchTab(page, "Notes & backup");
+  await page.locator("#theme-picker").selectOption(value);
+  await closeWorkbench(page);
+}
 
 async function withPage(fn, options = {}) {
   const browser = await chromium.launch({ headless: true });

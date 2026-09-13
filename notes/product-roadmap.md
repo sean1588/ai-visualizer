@@ -123,6 +123,20 @@ emits content-hashed assets, and the PNG renderer is bundled as a lazy chunk.
 - Presentation mode removes editing chrome for reviews and screen sharing.
 - Portable dashboard backups restore rows, recipes, views, goals, notes, and theme.
 
+### Action hierarchy
+
+- One action table describes every document-level action once; header menus,
+  keyboard shortcuts, and the command palette read from it.
+- The dashboard header shows a save-state pill, compact undo/redo only when
+  history exists, Data and Export menus, and Present; the landing page shows
+  only the wordmark and breadcrumb.
+- HTTP-only actions such as Refresh data and Alerts are omitted for local
+  datasets instead of rendered disabled.
+- The dashboard head keeps a single Analyze button; the executive brief and
+  recipe inspector became workbench tabs and the theme picker moved to Notes.
+- Cmd/Ctrl+K opens a command palette that reaches every action and workbench
+  tab; Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z, `/`, `P`, and Escape work on the dashboard.
+
 ## Architecture boundaries
 
 ### Paid and collaborative capabilities
