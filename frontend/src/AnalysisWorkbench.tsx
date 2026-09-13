@@ -9,29 +9,28 @@ import {
   formatCompact,
   humanize,
   kpiGoalsFromRecipe,
+  operatorLabel,
   scanSensitiveColumns,
   widgetFingerprint,
   type DashboardFilter,
   type DashboardRecipe,
+  type DashboardTheme,
+  type DataSource,
+  type ExecutiveBrief,
   type FilterOperator,
   type KpiGoal,
+  type KpiWidget,
+  type ParseHealth,
   type Row,
   type SavedDashboardView,
   type SchemaColumn,
+  type SchemaOverrides,
 } from './domain';
-import { CloseButton, useDialog } from './InsightsDialogs';
+import { CloseButton, ExecutiveBriefPanel, RecipeInspectorPanel, useDialog } from './InsightsDialogs';
+import type { WorkbenchTab } from './state';
 import { parseDashboardBundle } from './workspace';
 
-type WorkbenchTab = 'focus' | 'goals' | 'discover' | 'notes';
-
-const OPERATOR_LABELS: Record<FilterOperator, string> = {
-  equals: 'equals',
-  contains: 'contains',
-  'at-least': 'at least',
-  'at-most': 'at most',
-  after: 'on or after',
-  before: 'on or before',
-};
+const TABS: WorkbenchTab[] = ['focus', 'goals', 'discover', 'brief', 'recipe', 'notes'];
 
 function profileDetail(fact: ReturnType<typeof buildDataProfile>['facts'][number]): string {
   if (fact.type === 'number') {
@@ -46,6 +45,7 @@ function profileDetail(fact: ReturnType<typeof buildDataProfile>['facts'][number
 
 export default function AnalysisWorkbench({
   open,
+  initialTab = 'focus',
   rows,
   allRows,
   schema,
@@ -55,6 +55,11 @@ export default function AnalysisWorkbench({
   kpiGoals,
   dashboardNotes,
   excludeOutliers,
+  theme,
+  brief,
+  dataSource,
+  parseHealth,
+  schemaOverrides,
   onClose,
   onFilters,
   onSavedViews,
@@ -63,8 +68,12 @@ export default function AnalysisWorkbench({
   onPrompt,
   onExport,
   onImport,
+  onTheme,
+  onInspectBrief,
+  onCopyBrief,
 }: {
   open: boolean;
+  initialTab?: WorkbenchTab;
   rows: Row[];
   allRows: Row[];
   schema: SchemaColumn[];
@@ -74,6 +83,11 @@ export default function AnalysisWorkbench({
   kpiGoals: KpiGoal[];
   dashboardNotes: string;
   excludeOutliers: boolean;
+  theme: DashboardTheme;
+  brief: ExecutiveBrief | null;
+  dataSource: DataSource | null;
+  parseHealth: ParseHealth | null;
+  schemaOverrides: SchemaOverrides;
   onClose: () => void;
   onFilters: (filters: DashboardFilter[]) => void;
   onSavedViews: (views: SavedDashboardView[]) => void;
@@ -82,11 +96,14 @@ export default function AnalysisWorkbench({
   onPrompt: (prompt: string) => void;
   onExport: () => void;
   onImport: (source: string) => string | null;
+  onTheme: (theme: DashboardTheme) => void;
+  onInspectBrief: (widget: KpiWidget) => void;
+  onCopyBrief: (markdown: string) => void;
 }) {
   const ref = useDialog(open);
   const importRef = useRef<HTMLInputElement>(null);
   const importErrorRef = useRef<HTMLDivElement>(null);
-  const [tab, setTab] = useState<WorkbenchTab>('focus');
+  const [tab, setTab] = useState<WorkbenchTab>(initialTab);
   const [columnName, setColumnName] = useState(schema[0]?.name || '');
   const [operator, setOperator] = useState<FilterOperator>(filterOperators(schema[0])[0]);
   const [notesDraft, setNotesDraft] = useState(dashboardNotes);
@@ -107,6 +124,10 @@ export default function AnalysisWorkbench({
   useEffect(() => {
     if (open) setNotesDraft(dashboardNotes);
   }, [dashboardNotes, open]);
+
+  useEffect(() => {
+    if (open) setTab(initialTab);
+  }, [initialTab, open]);
 
   useEffect(() => {
     if (open) window.setTimeout(() => ref.current?.querySelector<HTMLButtonElement>('.workbench-tabs button.active')?.focus(), 0);
@@ -176,11 +197,11 @@ export default function AnalysisWorkbench({
   return (
     <dialog id="analysis-workbench" className="mise-dialog workbench-dialog" ref={ref} aria-labelledby="workbench-title" onClose={onClose}>
       <div className="dialog-head">
-        <div><div className="eyebrow eyebrow-accent">Analysis workbench</div><h2 id="workbench-title">Explore without changing the recipe.</h2></div>
+        <div><div className="eyebrow eyebrow-accent">Analyze</div><h2 id="workbench-title">Explore without changing the recipe.</h2></div>
         <CloseButton onClose={() => ref.current?.close()} />
       </div>
       <nav className="workbench-tabs" aria-label="Analysis tools">
-        {(['focus', 'goals', 'discover', 'notes'] as WorkbenchTab[]).map(value => (
+        {TABS.map(value => (
           <button type="button" className={tab === value ? 'active' : ''} aria-pressed={tab === value} onClick={() => setTab(value)} key={value}>{value === 'notes' ? 'Notes & backup' : humanize(value)}</button>
         ))}
       </nav>
@@ -190,13 +211,13 @@ export default function AnalysisWorkbench({
             <div className="workbench-intro"><div role="status" aria-live="polite"><span className="eyebrow">Focus filters</span><h3>{rows.length} of {allRows.length} rows in view</h3></div><button type="button" className="btn btn-ghost" disabled={!filters.length} onClick={() => onFilters([])}>Clear filters</button></div>
             <form id="focus-filter-form" className="workbench-form" onSubmit={addFilter}>
               <label><span>Column</span><select name="column" value={columnName} onChange={event => setColumnName(event.target.value)}>{schema.map(column => <option value={column.name} key={column.name}>{humanize(column.name)}</option>)}</select></label>
-              <label><span>Rule</span><select name="operator" value={operator} onChange={event => setOperator(event.target.value as FilterOperator)}>{operators.map(value => <option value={value} key={value}>{OPERATOR_LABELS[value]}</option>)}</select></label>
+              <label><span>Rule</span><select name="operator" value={operator} onChange={event => setOperator(event.target.value as FilterOperator)}>{operators.map(value => <option value={value} key={value}>{operatorLabel(value)}</option>)}</select></label>
               <label><span>Value</span><input name="value" type={selectedColumn?.type === 'number' ? 'number' : selectedColumn?.type === 'date' ? 'date' : 'text'} step="any" required /></label>
               <button type="submit" className="btn btn-primary">Add filter</button>
             </form>
             <div id="active-filter-list" className="active-filter-list">
               {!filters.length && <p>No filters active. Every widget uses the complete dataset.</p>}
-              {filters.map(filter => <button type="button" key={filter.id} onClick={() => onFilters(filters.filter(candidate => candidate.id !== filter.id))}>{humanize(filter.column)} {OPERATOR_LABELS[filter.operator]} “{filter.value}” <span>×</span></button>)}
+              {filters.map(filter => <button type="button" key={filter.id} onClick={() => onFilters(filters.filter(candidate => candidate.id !== filter.id))}>{humanize(filter.column)} {operatorLabel(filter.operator)} “{filter.value}” <span>×</span></button>)}
             </div>
             <div className="saved-view-panel">
               <div><span className="eyebrow">Saved views</span><p>Keep useful slices with this plate.</p></div>
@@ -249,6 +270,19 @@ export default function AnalysisWorkbench({
           </section>
         )}
 
+        {tab === 'brief' && <ExecutiveBriefPanel brief={brief} onInspect={onInspectBrief} onCopy={onCopyBrief} />}
+
+        {tab === 'recipe' && (
+          <RecipeInspectorPanel
+            recipe={recipe}
+            schema={schema}
+            dataSource={dataSource}
+            parseHealth={parseHealth}
+            schemaOverrides={schemaOverrides}
+            excludeOutliers={excludeOutliers}
+          />
+        )}
+
         {tab === 'notes' && (
           <section className="workbench-section notes-backup-grid">
             <article>
@@ -290,6 +324,11 @@ export default function AnalysisWorkbench({
                 reader.readAsText(file);
                 event.currentTarget.value = '';
               }} />
+            </article>
+            <article className="theme-article">
+              <span className="eyebrow">Appearance</span>
+              <h3>Pick the palette for this plate.</h3>
+              <label className="theme-picker"><span>Theme</span><select id="theme-picker" value={theme} onChange={event => onTheme(event.target.value as DashboardTheme)}><option value="mise">Mise</option><option value="ink">Ink</option><option value="ocean">Ocean</option><option value="plum">Plum</option><option value="marketing">Marketing site</option></select></label>
             </article>
           </section>
         )}

@@ -6,6 +6,7 @@ import {
   applyRecipeToRows,
   buildDataProfile,
   buildExecutiveBrief,
+  buildFollowUpQuestions,
   buildParseHealth,
   buildRecipePayload,
   captureDatasetSnapshot,
@@ -23,18 +24,21 @@ import {
   hasUsefulChartOpportunity,
   humanize,
   incomingKind,
+  inspectedColumn,
   inferSchema,
   isRecipePayload,
   isTableOnlyRecipe,
   metricValues,
   normalizeTableFields,
   normalizePublicDataUrl,
+  operatorLabel,
   parseAndValidateRecipe,
   parseCsvRecords,
   parseInput,
   refreshCadence,
   repairCanonicalWidgets,
   seriesBy,
+  setEqualsFilter,
   sortTableRows,
   sourceFreshness,
   splitCsv,
@@ -57,18 +61,22 @@ import {
   type TableWidget,
   type ThresholdAlert,
 } from './domain';
+import { buildDashboardActions, MOD_KEY, type DashboardAction } from './actions';
 import AnalysisWorkbench from './AnalysisWorkbench';
+import CommandPalette from './CommandPalette';
 import DataHealthDialog from './DataHealth';
 import ExampleGallery from './ExampleGallery';
 import { EXAMPLE_PLATES, type ExamplePlate } from './examples';
-import { AlertsDialog, ExecutiveBriefDialog, RecipeInspectorDialog } from './InsightsDialogs';
+import { AlertsDialog } from './InsightsDialogs';
+import Menu from './Menu';
+import MobileActionBar, { useCompactViewport } from './MobileActionBar';
 import { buildChefPrompt, buildPrompt } from './prompts';
 import { complete, fetchRemoteData } from './services';
 import { buildRecipeLink, buildStandaloneHtml, decodeRecipeFragment } from './sharing';
-import { appReducer, createInitialState, initialSteps, type AppState, type ChefMessage, type LoadingStep, type RecipeRevision } from './state';
+import { appReducer, createInitialState, initialSteps, type AppState, type ChefMessage, type LoadingStep, type RecipeRevision, type WorkbenchTab } from './state';
 import { clearRecents, loadRecents, migrateLegacyStorage, relativeTime, saveRecent, type RecentDashboard } from './storage';
 import { track } from './telemetry';
-import WidgetGrid from './WidgetGrid';
+import WidgetGrid, { InlineRename, type WidgetEditAction } from './WidgetGrid';
 import { buildDashboardBundle, parseDashboardBundle } from './workspace';
 
 declare global {
@@ -174,16 +182,21 @@ function tableTransformLabel(widget: TableWidget): string {
   return parts.join(' · ');
 }
 
-function statusLabel(state: AppState): string {
-  if (state.statusMessage) return state.statusMessage;
+function statusLabel(state: AppState): { text: string; saved: boolean; short: string } {
+  if (state.statusMessage) {
+    const text = state.statusMessage;
+    const saved = !state.statusError;
+    const short = state.statusError ? 'Failed' : /refreshing/i.test(text) ? 'Refreshing…' : /stale/i.test(text) ? 'Stale' : 'Saved';
+    return { text, saved, short };
+  }
+  if (state.refreshing) return { text: 'Refreshing…', saved: false, short: 'Refreshing…' };
   if (hasHttpSource(state.dataSource)) {
     const freshness = sourceFreshness(state.dataSource as DataSource, Date.now(), state.updatedAt);
-    if (freshness.status === 'error') return 'HTTP · refresh error';
-    if (freshness.status === 'stale') return 'HTTP · stale';
-    return 'HTTP · refreshable';
+    if (freshness.status === 'error') return { text: 'Refresh failed', saved: false, short: 'Failed' };
+    if (freshness.status === 'stale') return { text: 'Stale · refresh available', saved: false, short: 'Stale' };
   }
-  if (state.recipe) return 'Live · ready to export';
-  return 'Local · not exported';
+  if (state.id && state.updatedAt) return { text: `Saved in this browser · ${relativeTime(state.updatedAt)}`, saved: true, short: 'Saved' };
+  return { text: 'Not saved yet', saved: false, short: 'Unsaved' };
 }
 
 function signedCount(value: number, noun: string): string {
@@ -363,7 +376,7 @@ function AssumptionsDialog({
     if (validated.widgets[0]) onApply(validated.widgets[0]);
   };
   return (
-    <dialog id="assumptions-dialog" className="mise-dialog" ref={dialogRef} onClose={onClose}>
+    <dialog id="assumptions-dialog" className="mise-dialog" ref={dialogRef} aria-labelledby="assumptions-title" onClose={onClose}>
       <form id="assumptions-form" method="dialog" onSubmit={handleSubmit}>
         <div className="dialog-head">
           <div><div className="eyebrow eyebrow-accent">Widget assumptions</div><h2 id="assumptions-title">{widget.title || ('label' in widget ? widget.label : humanize(widget.type))}</h2></div>
@@ -409,7 +422,7 @@ function AssumptionsDialog({
   );
 }
 
-function InspectorDialog({ state, onClose }: { state: AppState; onClose: () => void }) {
+function InspectorDialog({ state, onClose, onFocusValue }: { state: AppState; onClose: () => void; onFocusValue: (column: string, value: unknown) => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<string | null>(null);
@@ -447,10 +460,27 @@ function InspectorDialog({ state, onClose }: { state: AppState; onClose: () => v
   if (!inspector) return null;
   const visible = filteredRows.slice(0, 200);
   const widgetTitle = inspector.widget.title || ('label' in inspector.widget ? inspector.widget.label : 'Widget');
+  const focusColumn = inspector.selectedValue == null ? null : inspectedColumn(inspector.widget);
   return (
-    <dialog id="inspector-dialog" className="mise-dialog" ref={dialogRef} onClose={onClose}>
+    <dialog id="inspector-dialog" className="mise-dialog" ref={dialogRef} aria-labelledby="inspector-title" onClose={onClose}>
       <div className="dialog-head">
-        <div><div className="eyebrow eyebrow-accent">Contributing data</div><h2 id="inspector-title">{widgetTitle} · {inspector.selectedValue === null ? 'source rows' : String(inspector.selectedValue)}</h2></div>
+        <div>
+          <div className="eyebrow eyebrow-accent">Contributing data</div>
+          <h2 id="inspector-title">{widgetTitle} · {inspector.selectedValue === null ? 'source rows' : String(inspector.selectedValue)}</h2>
+          {focusColumn && inspector.selectedValue != null && (
+            <button
+              id="focus-on-value"
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                onFocusValue(focusColumn, inspector.selectedValue);
+                dialogRef.current?.close();
+              }}
+            >
+              Focus dashboard on {humanize(focusColumn)} = {String(inspector.selectedValue)}
+            </button>
+          )}
+        </div>
         <button id="inspector-close" className="dialog-close" type="button" aria-label="Close" onClick={() => dialogRef.current?.close()}>×</button>
       </div>
       <div className="dialog-body">
@@ -486,6 +516,7 @@ function App() {
   const [fileName, setFileName] = useState('no file selected');
   const [chefInput, setChefInput] = useState('');
   const [clock, setClock] = useState(Date.now());
+  const compact = useCompactViewport();
 
   useEffect(() => {
     stateRef.current = state;
@@ -517,14 +548,13 @@ function App() {
           recipeHistoryIndex: -1,
           alerts: [],
           theme: 'mise',
-          briefOpen: false,
-          recipeInspectorOpen: false,
           alertsOpen: false,
           filters: [],
           savedViews: [],
           kpiGoals: [],
           dashboardNotes: '',
           workbenchOpen: false,
+          paletteOpen: false,
           presentationMode: false,
         },
       });
@@ -548,13 +578,8 @@ function App() {
     document.body.classList.toggle('presentation-mode', state.presentationMode);
     if (!state.presentationMode) return;
     const focusTimer = window.setTimeout(() => document.getElementById('exit-presentation')?.focus(), 0);
-    const exit = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') dispatch({ type: 'patch', value: { presentationMode: false } });
-    };
-    window.addEventListener('keydown', exit);
     return () => {
       window.clearTimeout(focusTimer);
-      window.removeEventListener('keydown', exit);
       window.setTimeout(() => presentationReturnFocus.current?.isConnected && presentationReturnFocus.current.focus(), 0);
     };
   }, [state.presentationMode]);
@@ -709,6 +734,7 @@ function App() {
         dashboardNotes: options.notes ?? notes,
         workbenchOpen: false,
         presentationMode: false,
+        paletteOpen: false,
         statusMessage: null,
         statusError: false,
       },
@@ -1040,9 +1066,9 @@ function App() {
       const clone = dashboard.cloneNode(true) as HTMLElement;
       clone.classList.add('is-active');
       clone.querySelector('#recurring-report')?.remove();
-      clone.querySelector('.dash-share-actions')?.remove();
+      clone.querySelector('.dash-actions')?.remove();
       clone.querySelector('.recipe-history')?.remove();
-      clone.querySelectorAll('.widget-action,.assumption-chip,.widget-edit,.table-export-btn,.retry-ai-btn,#data-health-btn').forEach(element => element.remove());
+      clone.querySelectorAll('.widget-menu,.widget-drag-handle,.retry-ai-btn,#data-health-btn').forEach(element => element.remove());
       const html = buildStandaloneHtml({
         title: current.recipe.title,
         dashboardHtml: clone.outerHTML,
@@ -1127,28 +1153,39 @@ function App() {
     flashStatus('Assumptions updated');
   }, [commitRecipeChange, flashStatus]);
 
-  const editWidget = useCallback((index: number, action: 'move-up' | 'move-down' | 'resize' | 'duplicate' | 'remove') => {
+  const editWidget = useCallback((index: number, action: WidgetEditAction, payload?: string) => {
     const current = stateRef.current;
     if (!current.recipe) return;
     const widgets = [...current.recipe.widgets];
     const widget = widgets[index];
     if (!widget) return;
-    let label = `Edited ${widget.title || ('label' in widget ? widget.label : humanize(widget.type))}`;
-    if (action === 'move-up' || action === 'move-down') {
+    const title = widget.title || ('label' in widget ? widget.label : humanize(widget.type));
+    let label = `Edited ${title}`;
+    if (action === 'rename') {
+      const next = payload?.trim() || '';
+      if (!next || next === title) return;
+      widgets[index] = widget.type === 'kpi' ? { ...widget, title: next, label: next } : { ...widget, title: next };
+      label = `Renamed ${title} to ${next}`;
+    } else if (action === 'move-to') {
+      const destination = Number(payload);
+      if (!Number.isInteger(destination) || destination < 0 || destination >= widgets.length || destination === index) return;
+      const [moved] = widgets.splice(index, 1);
+      widgets.splice(destination, 0, moved);
+      label = `Moved ${title}`;
+    } else if (action === 'move-up' || action === 'move-down') {
       const destination = index + (action === 'move-up' ? -1 : 1);
       if (destination < 0 || destination >= widgets.length) return;
       [widgets[index], widgets[destination]] = [widgets[destination], widgets[index]];
-      label = `Moved ${widget.title || ('label' in widget ? widget.label : humanize(widget.type))}`;
+      label = `Moved ${title}`;
     } else if (action === 'resize') {
       if (widget.type === 'table' || widget.type === 'observations') return;
       const spans = [3, 4, 6, 8, 12] as const;
       const spanIndex = spans.indexOf(widget.span as typeof spans[number]);
       const span = spans[(spanIndex + 1) % spans.length];
       widgets[index] = { ...widget, span } as RenderedWidget;
-      label = `Resized ${widget.title || ('label' in widget ? widget.label : humanize(widget.type))} to ${span}/12`;
+      label = `Resized ${title} to ${span}/12`;
     } else if (action === 'duplicate') {
       const duplicate = cloneRecipe({ title: '', widgets: [widget] }).widgets[0];
-      const title = widget.title || ('label' in widget ? widget.label : humanize(widget.type));
       if ('label' in duplicate) duplicate.label = `${title} copy`;
       duplicate.title = `${title} copy`;
       widgets.splice(index + 1, 0, duplicate);
@@ -1159,12 +1196,22 @@ function App() {
         return;
       }
       widgets.splice(index, 1);
-      label = `Removed ${widget.title || ('label' in widget ? widget.label : humanize(widget.type))}`;
+      label = `Removed ${title}`;
     }
     const recipe = { ...current.recipe, widgets };
     commitRecipeChange(recipe, label, { changedWidgets: new Set(widgets.map(widgetFingerprint)) });
     track('direct_edit', { action });
     window.setTimeout(() => dispatch({ type: 'patch', value: { changedWidgets: new Set() } }), 1200);
+    flashStatus(label);
+  }, [commitRecipeChange, flashStatus]);
+
+  const renameDashboard = useCallback((title: string) => {
+    const current = stateRef.current;
+    if (!current.recipe) return;
+    const next = title.trim();
+    if (!next || next === current.recipe.title) return;
+    const label = `Renamed ${current.recipe.title} to ${next}`;
+    commitRecipeChange({ ...current.recipe, title: next }, label);
     flashStatus(label);
   }, [commitRecipeChange, flashStatus]);
 
@@ -1200,6 +1247,30 @@ function App() {
   const openChefForWidget = useCallback((index: number) => {
     dispatch({ type: 'patch', value: { chefOpen: true, chefWidgetIndex: index } });
     window.setTimeout(() => document.getElementById('chef-input')?.focus(), 0);
+  }, []);
+
+  const openChef = useCallback(() => {
+    dispatch({ type: 'patch', value: { chefOpen: true, chefWidgetIndex: null } });
+    window.setTimeout(() => document.getElementById('chef-input')?.focus(), 0);
+  }, []);
+
+  const openWorkbench = useCallback((tab: WorkbenchTab) => {
+    dispatch({ type: 'patch', value: { workbenchOpen: true, workbenchTab: tab } });
+  }, []);
+
+  const togglePresentation = useCallback(() => {
+    const current = stateRef.current;
+    if (!current.recipe) return;
+    if (!current.presentationMode) {
+      presentationReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      document.querySelectorAll<HTMLDetailsElement>('details.menu[open], details.recipe-history[open]').forEach(details => details.removeAttribute('open'));
+      dispatch({
+        type: 'patch',
+        value: { presentationMode: true, chefOpen: false, chefWidgetIndex: null, workbenchOpen: false, paletteOpen: false },
+      });
+      return;
+    }
+    dispatch({ type: 'patch', value: { presentationMode: false } });
   }, []);
 
   const updateAlerts = useCallback((alerts: ThresholdAlert[]) => {
@@ -1326,6 +1397,27 @@ function App() {
     track('chart_inspected', { widgetType: widget.type });
   }, []);
 
+  const applyEqualsFocus = useCallback((column: string, value: unknown, widgetType?: string) => {
+    const current = stateRef.current;
+    const filters = setEqualsFilter(current.filters, column, value, `filter_${Date.now().toString(36)}`);
+    if (filters === current.filters) return;
+    track('focus_from_chart', { widgetType: widgetType ?? current.inspector?.widget.type });
+    updateWorkbench({ filters });
+    flashStatus(`Focused on ${String(value)}`);
+  }, [flashStatus, updateWorkbench]);
+
+  const focusOnWidgetValue = useCallback((widget: RenderedWidget, value: unknown) => {
+    const column = inspectedColumn(widget);
+    if (!column) return;
+    const current = stateRef.current;
+    const existing = current.filters.find(filter => filter.column === column && filter.operator === 'equals');
+    if (existing && String(existing.value).toLocaleLowerCase() === String(value ?? '').toLocaleLowerCase()) {
+      updateWorkbench({ filters: current.filters.filter(filter => !(filter.column === column && filter.operator === 'equals')) });
+      return;
+    }
+    applyEqualsFocus(column, value, widget.type);
+  }, [applyEqualsFocus, updateWorkbench]);
+
   const submitChef = useCallback(async (request: string) => {
     const text = request.trim();
     const current = stateRef.current;
@@ -1437,6 +1529,7 @@ function App() {
         kpiGoals: Array.isArray(recent.kpiGoals) ? recent.kpiGoals : [],
         dashboardNotes: typeof recent.dashboardNotes === 'string' ? recent.dashboardNotes : '',
         workbenchOpen: false,
+        paletteOpen: false,
         presentationMode: false,
         previousSnapshot: recent.previousSnapshot || null,
         updatedAt: recent.updatedAt || recent.savedAt,
@@ -1589,7 +1682,117 @@ function App() {
   const currentTitle = state.recipe?.title || state.title;
   const chefTarget = state.chefWidgetIndex === null ? null : state.recipe?.widgets[state.chefWidgetIndex] || null;
   const chefTargetLabel = chefTarget?.title || (chefTarget && 'label' in chefTarget ? chefTarget.label : null);
+  const chefFollowUps = useMemo(
+    () => (state.recipe ? buildFollowUpQuestions(state.recipe, state.schema).slice(0, 5) : []),
+    [state.recipe, state.schema],
+  );
   const steps: Array<[LoadingStep, string]> = [['parse', 'Parse data'], ['infer', 'Infer schema'], ['layout', 'Propose layout'], ['render', 'Render dashboard']];
+  const isHttp = hasHttpSource(state.dataSource);
+  const dashboardActions = useMemo(() => buildDashboardActions({
+    hasRecipe: !!state.recipe,
+    hasHttpSource: isHttp,
+    refreshing: state.refreshing,
+    historyIndex: state.recipeHistoryIndex,
+    historyLength: state.recipeHistory.length,
+    healthIssueCount: health ? healthIssueCount : null,
+    alertCount: state.alerts.length,
+    triggeredAlerts,
+    replaceData: () => replacementInputRef.current?.click(),
+    refresh: () => void refreshDashboard(),
+    openDataHealth: () => dispatch({ type: 'patch', value: { healthOpen: true } }),
+    openAlerts: () => dispatch({ type: 'patch', value: { alertsOpen: true } }),
+    exportPng: () => void exportPng(),
+    exportHtml: exportStandalone,
+    exportRecipe,
+    copyRecipeLink: () => void copyRecipeLink(),
+    exportBackup: exportDashboardBundle,
+    present: togglePresentation,
+    openWorkbench,
+    openChef,
+    undo: () => navigateRecipeHistory(-1),
+    redo: () => navigateRecipeHistory(1),
+  }), [copyRecipeLink, exportDashboardBundle, exportPng, exportRecipe, exportStandalone, health, healthIssueCount, isHttp, navigateRecipeHistory, openChef, openWorkbench, refreshDashboard, state.alerts.length, state.recipe, state.recipeHistory.length, state.recipeHistoryIndex, state.refreshing, togglePresentation, triggeredAlerts]);
+  const actionsRef = useRef(dashboardActions);
+  useEffect(() => {
+    actionsRef.current = dashboardActions;
+  }, [dashboardActions]);
+
+  useEffect(() => {
+    const runAction = (id: string) => {
+      const action = actionsRef.current.find(candidate => candidate.id === id);
+      if (action?.visible && action.enabled) action.run();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      const current = stateRef.current;
+      if (current.stage !== 'dash' || !current.recipe) return;
+      const target = event.target;
+      const editable = target instanceof HTMLElement && !!target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
+      const modifier = event.metaKey || event.ctrlKey;
+      const key = event.key.toLowerCase();
+      if (event.key === 'Escape') {
+        if (current.paletteOpen) {
+          dispatch({ type: 'patch', value: { paletteOpen: false } });
+          return;
+        }
+        const openMenu = document.querySelector<HTMLDetailsElement>('details.menu[open], details.recipe-history[open]');
+        if (openMenu) {
+          openMenu.removeAttribute('open');
+          openMenu.querySelector<HTMLElement>('summary')?.focus();
+          return;
+        }
+        if (document.querySelector('dialog[open]')) return;
+        if (current.workbenchOpen) {
+          dispatch({ type: 'patch', value: { workbenchOpen: false } });
+          return;
+        }
+        if (current.chefOpen) {
+          dispatch({ type: 'patch', value: { chefOpen: false, chefWidgetIndex: null } });
+          return;
+        }
+        if (current.presentationMode) dispatch({ type: 'patch', value: { presentationMode: false } });
+        return;
+      }
+      if (modifier && key === 'k') {
+        if (current.presentationMode) return;
+        event.preventDefault();
+        dispatch({ type: 'patch', value: { paletteOpen: !current.paletteOpen } });
+        return;
+      }
+      if (editable) return;
+      if (modifier && key === 'z') {
+        event.preventDefault();
+        runAction(event.shiftKey ? 'redo' : 'undo');
+        return;
+      }
+      if (modifier || event.altKey || document.querySelector('dialog[open]')) return;
+      if (current.presentationMode) {
+        if (key === 'p' && !event.shiftKey) {
+          event.preventDefault();
+          runAction('present');
+        }
+        return;
+      }
+      if (event.key === '/') {
+        event.preventDefault();
+        runAction('chef');
+        return;
+      }
+      if (key === 'p' && !event.shiftKey) {
+        event.preventDefault();
+        runAction('present');
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  const actionById = (id: string): DashboardAction | undefined => dashboardActions.find(action => action.id === id);
+  const undoAction = actionById('undo');
+  const redoAction = actionById('redo');
+  const presentAction = actionById('present');
+  const analyzeAction = actionById('analyze');
+  const showDashboardChrome = state.stage === 'dash' && !!state.recipe;
+  const status = statusLabel(state);
   return (
     <>
       <header className="top">
@@ -1598,15 +1801,23 @@ function App() {
           <span className="crumb-sep">/</span>
           <span id="crumb" className="crumb-active">{state.stage === 'loading' ? 'Reading…' : state.stage === 'dash' ? currentTitle : 'New dashboard'}</span>
         </div>
-        <div className="top-right">
-          <span id="status-pill" className="pill" role="status" aria-live="polite"><span className={`pill-dot ${state.recipe && !state.statusError ? 'active' : ''}`} />{statusLabel(state)}</span>
-          <button id="replace-data-btn" className="btn btn-ghost" disabled={!state.recipe} title="Apply new CSV or JSON rows to this dashboard recipe" onClick={() => replacementInputRef.current?.click()}>Replace data</button>
-          <input id="replacement-input" ref={replacementInputRef} type="file" accept=".csv,.json,.txt,application/json,text/csv,text/plain" hidden onChange={event => { const file = event.target.files?.[0]; if (file) replaceDashboardData(file); }} />
-          <button id="refresh-btn" className="btn btn-ghost" disabled={!state.recipe || !hasHttpSource(state.dataSource) || state.refreshing} title="Fetch fresh rows from the saved HTTP source" onClick={() => void refreshDashboard()}>{state.refreshing ? 'Refreshing…' : 'Refresh data'}</button>
-          <button id="export-recipe-btn" className="btn btn-ghost" disabled={!state.recipe} title="Download the layout recipe as JSON" onClick={exportRecipe}>Recipe ↓</button>
-          <button id="export-btn" className="btn btn-ghost" disabled={!state.recipe} onClick={() => void exportPng()}>Export PNG ↓</button>
-        </div>
+        {showDashboardChrome && (
+          <div className="top-right">
+            <span id="status-pill" className="pill" role="status" aria-live="polite"><span className={`pill-dot ${status.saved ? 'active' : ''}`} /><span className="status-full">{status.text}</span><span className="status-short">{status.short}</span></span>
+            {!compact && (
+              <>
+                {undoAction?.visible && <button id="recipe-undo" className="btn btn-ghost btn-icon" type="button" aria-label="Undo" title={`Undo · ${undoAction.shortcut}`} disabled={!undoAction.enabled} onClick={undoAction.run}>↶</button>}
+                {redoAction?.visible && <button id="recipe-redo" className="btn btn-ghost btn-icon" type="button" aria-label="Redo" title={`Redo · ${redoAction.shortcut}`} disabled={!redoAction.enabled} onClick={redoAction.run}>↷</button>}
+                <Menu id="data-menu" label="Data" actions={dashboardActions.filter(action => action.group === 'data')} />
+                <Menu id="export-menu" label="Export" actions={dashboardActions.filter(action => action.group === 'export')} />
+                {presentAction?.visible && <button id="presentation-mode" className="btn btn-ghost" type="button" title={presentAction.hint} onClick={presentAction.run}>Present</button>}
+                <kbd className="shortcut-hint" title="Command palette">{MOD_KEY}K</kbd>
+              </>
+            )}
+          </div>
+        )}
       </header>
+      <input id="replacement-input" ref={replacementInputRef} type="file" accept=".csv,.json,.txt,application/json,text/csv,text/plain" hidden onChange={event => { const file = event.target.files?.[0]; if (file) replaceDashboardData(file); }} />
       {state.presentationMode && <button id="exit-presentation" className="btn btn-primary presentation-exit" type="button" onClick={() => dispatch({ type: 'patch', value: { presentationMode: false } })}>Exit presentation</button>}
 
       <section id="stage-empty" className={`stage ${state.stage === 'empty' ? 'is-active' : ''}`}>
@@ -1676,11 +1887,25 @@ function App() {
           <>
             <div className="dash-head">
               <div className="eyebrow eyebrow-accent">— Dashboard —</div>
-              <h1 id="dash-title">{state.recipe.title}</h1>
+              <InlineRename as="h1" id="dash-title" value={state.recipe.title} onCommit={renameDashboard} />
               <div id="dash-meta" className="dash-head-meta">
                 {state.rows.length} rows · {state.schema.length} cols · updated {new Date(state.updatedAt || Date.now()).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
               </div>
-              {!!state.filters.length && <div id="focus-summary" className="focus-summary"><strong>Focused view</strong><span>{focusedRows.length} of {state.rows.length} rows · {state.filters.length} active filter{state.filters.length === 1 ? '' : 's'}</span><button type="button" onClick={() => updateWorkbench({ filters: [] })}>Clear</button></div>}
+              {!!state.filters.length && (
+                <div id="focus-summary" className="focus-summary focus-chips">
+                  <span className="focus-chips-label"><strong>Focused</strong> · {focusedRows.length} of {state.rows.length} rows</span>
+                  {state.filters.map(filter => {
+                    const label = `${humanize(filter.column)} ${operatorLabel(filter.operator)} ${filter.value}`;
+                    return (
+                      <span className="focus-chip" key={filter.id}>
+                        <button type="button" className="focus-chip-body" onClick={() => dispatch({ type: 'patch', value: { workbenchOpen: true, workbenchTab: 'focus' } })}>{label}</button>
+                        <button type="button" className="focus-chip-remove" aria-label={`Remove filter ${label}`} onClick={() => updateWorkbench({ filters: state.filters.filter(candidate => candidate.id !== filter.id) })}>×</button>
+                      </span>
+                    );
+                  })}
+                  <button id="focus-clear" type="button" onClick={() => updateWorkbench({ filters: [] })}>Clear all</button>
+                </div>
+              )}
               {state.dashboardNotes && <p id="dashboard-context" className="dashboard-context">{state.dashboardNotes}</p>}
               {health && (
                 <div id="dash-health" className="dash-health">
@@ -1690,32 +1915,22 @@ function App() {
                   </button>
                 </div>
               )}
-              <div className="dash-share-actions">
-                <button id="open-workbench" type="button" className="btn btn-primary" onClick={() => dispatch({ type: 'patch', value: { workbenchOpen: true } })}>Analysis workbench</button>
-                <button id="open-brief" type="button" className="btn btn-ghost" onClick={() => dispatch({ type: 'patch', value: { briefOpen: true } })}>Executive brief</button>
-                <button id="open-recipe-inspector" type="button" className="btn btn-ghost" onClick={() => dispatch({ type: 'patch', value: { recipeInspectorOpen: true } })}>Inspect recipe</button>
-                <button id="open-alerts" type="button" className={`btn btn-ghost ${triggeredAlerts ? 'has-alert' : ''}`} disabled={!hasHttpSource(state.dataSource)} title={hasHttpSource(state.dataSource) ? 'Configure thresholds evaluated after while-open refreshes' : 'Threshold alerts require a refreshable HTTP source'} onClick={() => dispatch({ type: 'patch', value: { alertsOpen: true } })}>Alerts · {triggeredAlerts || state.alerts.length}</button>
-                <button id="share-recipe-link" type="button" className="btn btn-ghost" onClick={() => void copyRecipeLink()}>Copy recipe link</button>
-                <button id="export-html-btn" type="button" className="btn btn-ghost" title="The exported file supports ?embed or #embed mode" onClick={exportStandalone}>Interactive HTML ↓</button>
-                <button id="presentation-mode" type="button" className="btn btn-ghost" onClick={event => {
-                  presentationReturnFocus.current = event.currentTarget;
-                  dispatch({ type: 'patch', value: { presentationMode: true } });
-                }}>Present</button>
-                <label className="theme-picker"><span>Theme</span><select id="theme-picker" value={state.theme} onChange={event => setDashboardTheme(event.target.value as DashboardTheme)}><option value="mise">Mise</option><option value="ink">Ink</option><option value="ocean">Ocean</option><option value="plum">Plum</option><option value="marketing">Marketing site</option></select></label>
-              </div>
-              <div className="recipe-history">
-                <button id="recipe-undo" type="button" className="btn btn-ghost" disabled={state.recipeHistoryIndex <= 0} onClick={() => navigateRecipeHistory(-1)}>↶ Undo</button>
-                <button id="recipe-redo" type="button" className="btn btn-ghost" disabled={state.recipeHistoryIndex >= state.recipeHistory.length - 1} onClick={() => navigateRecipeHistory(1)}>↷ Redo</button>
-                <details>
-                  <summary>{state.recipeHistory.length} revision{state.recipeHistory.length === 1 ? '' : 's'}</summary>
-                  <ol>{state.recipeHistory.map((revision, index) => <li className={index === state.recipeHistoryIndex ? 'current' : ''} key={`${revision.at}-${index}`}>{revision.label}</li>)}</ol>
-                </details>
+              <div className="dash-actions">
+                {analyzeAction && <button id="open-workbench" type="button" className="btn btn-primary" title={analyzeAction.hint} onClick={analyzeAction.run}>Analyze</button>}
+                {state.recipeHistory.length > 1 && (
+                  <details className="recipe-history">
+                    <summary>{state.recipeHistory.length} revisions</summary>
+                    <ol>{state.recipeHistory.map((revision, index) => <li className={index === state.recipeHistoryIndex ? 'current' : ''} key={`${revision.at}-${index}`}>{revision.label}</li>)}</ol>
+                  </details>
+                )}
               </div>
             </div>
             <RecurringReportSummary state={state} comparison={state.filters.length ? null : comparison} now={clock} onCadence={setRefreshCadence} />
             {focusedRows.length ? <WidgetGrid
               recipe={state.recipe}
               rows={focusedRows}
+              allRows={state.rows}
+              filters={state.filters}
               schema={state.schema}
               changedWidgets={state.changedWidgets}
               comparisons={state.filters.length ? [] : comparison?.kpis || []}
@@ -1723,28 +1938,31 @@ function App() {
               excludeOutliers={state.excludeOutliers}
               onAssumptions={index => dispatch({ type: 'patch', value: { assumptionsWidgetIndex: index } })}
               onInspect={openInspector}
+              onFocusValue={focusOnWidgetValue}
               onRetry={() => void retryAi()}
               onExportTable={exportTable}
               onCopyTable={widget => void copyTable(widget)}
               onEditWidget={editWidget}
               onChefWidget={openChefForWidget}
-            /> : <div id="focus-empty" className="focus-empty" role="status"><strong>No rows match this focused view.</strong><span>Clear or adjust a filter in the Analysis workbench to bring the dashboard back.</span><button type="button" className="btn btn-primary" onClick={() => updateWorkbench({ filters: [] })}>Clear filters</button></div>}
+            /> : <div id="focus-empty" className="focus-empty" role="status"><strong>No rows match this focused view.</strong><span>Clear or adjust a filter under Analyze to bring the dashboard back.</span><button type="button" className="btn btn-primary" onClick={() => updateWorkbench({ filters: [] })}>Clear filters</button></div>}
           </>
         )}
       </section>
 
-      {state.stage === 'dash' && !state.chefOpen && <button id="chef-fab" className="chef-fab is-visible" type="button" onClick={() => dispatch({ type: 'patch', value: { chefOpen: true, chefWidgetIndex: null } })}><span className="chef-fab-glyph">M</span><span>Talk to the chef</span></button>}
+      {showDashboardChrome && compact && !state.presentationMode && !state.chefOpen && !state.workbenchOpen && <MobileActionBar actions={dashboardActions} />}
+      {state.stage === 'dash' && !state.chefOpen && <button id="chef-fab" className="chef-fab is-visible" type="button" onClick={() => dispatch({ type: 'patch', value: { chefOpen: true, chefWidgetIndex: null } })}><span className="chef-fab-glyph">M</span><span>Talk to the Chef</span></button>}
       <aside id="chef-panel" className={`chef-panel ${state.chefOpen ? 'is-open' : ''}`} aria-label="The Chef">
         <div className="chef-hd"><div className="chef-hd-l"><span className="chef-hd-glyph">M</span><span className="chef-hd-name">The Chef</span>{chefTargetLabel && <span id="chef-target" className="chef-hd-tag">Editing · {chefTargetLabel}</span>}</div><button id="chef-close" className="chef-close" type="button" aria-label="Close" onClick={() => dispatch({ type: 'patch', value: { chefOpen: false, chefWidgetIndex: null } })}>×</button></div>
         <div id="chef-body" className="chef-body">
-          {!state.chefHistory.length && !state.chefThinking && <div id="chef-empty" className="chef-empty"><div className="chef-empty-eyebrow">Tell the chef what to change</div><p className="chef-empty-title">"Swap the donut for a bar chart, sorted by month."</p><div className="chef-suggestions">{[['Swap the donut for a bar chart', 'Swap the donut for a bar chart'], ['Hide the observations widget', 'Hide the observations widget'], ['Make the first KPI the hero metric — full width, larger', 'Promote the first KPI to a hero — full width'], ['Sort the table by date, descending, and limit to 20 rows', 'Sort the table by date desc, top 20'], ['Show a top 10 table sorted by the primary numeric metric, descending', 'Top 10 by primary metric']].map(([prompt, label]) => <button key={prompt} className="chef-suggestion" data-prompt={prompt} onClick={() => void submitChef(prompt)}>{label}</button>)}</div></div>}
-          <div id="chef-msgs" className="chef-msgs" aria-live="polite">{state.chefHistory.map((message, index) => message.role === 'user' ? <div className="chef-msg-user" key={index}>{message.content}</div> : message.role === 'error' ? <div className="chef-msg-error" role="alert" key={index}>{message.content}</div> : <div className={`chef-msg-chef ${message.undone ? 'is-undone' : ''}`} key={index}>"{message.content}"{message.previousRecipe && !message.undone && <button className="undo-btn" data-undo={index} type="button" onClick={() => undoChef(index)}>↶ Undo</button>}{message.changes?.length ? <span className="changes">{message.changes.join(' · ')}</span> : null}{message.undone && <span className="changes" style={{ color: 'var(--fg-mute)' }}>reverted</span>}</div>)}{state.chefThinking && <div className="chef-msg-thinking" role="status">tasting…</div>}</div>
+          {!state.chefHistory.length && !state.chefThinking && <div id="chef-empty" className="chef-empty"><div className="chef-empty-eyebrow">Tell the chef what to change</div>{chefFollowUps[0] && <p className="chef-empty-title">"{chefFollowUps[0].prompt}"</p>}<div className="chef-suggestions">{chefFollowUps.map(question => <button key={question.id} type="button" className="chef-suggestion" data-prompt={question.prompt} onClick={() => void submitChef(question.prompt)}>{question.label}</button>)}</div></div>}
+          <div id="chef-msgs" className="chef-msgs" aria-live="polite">{state.chefHistory.map((message, index) => message.role === 'user' ? <div className="chef-msg-user" key={index}>{message.content}</div> : message.role === 'error' ? <div className="chef-msg-error" role="alert" key={index}>{message.content}</div> : <div className={`chef-msg-chef ${message.undone ? 'is-undone' : ''}`} key={index}>"{message.content}"{message.previousRecipe && !message.undone && <button className="undo-btn" data-undo={index} type="button" onClick={() => undoChef(index)}>↶ Undo</button>}{message.changes?.length ? <span className="changes">{message.changes.join(' · ')}</span> : null}{message.undone && <span className="changes" style={{ color: 'var(--fg-mute)' }}>reverted</span>}{index === state.chefHistory.length - 1 && !message.undone && !!chefFollowUps.length && <div id="chef-try-next" className="chef-try-next"><span className="chef-try-next-label">Try next</span>{chefFollowUps.slice(0, 3).map(question => <button key={question.id} type="button" className="chef-suggestion" data-prompt={question.prompt} onClick={() => void submitChef(question.prompt)}>{question.label}</button>)}</div>}</div>)}{state.chefThinking && <div className="chef-msg-thinking" role="status">tasting…</div>}</div>
         </div>
         <div className="chef-input-row"><textarea id="chef-input" className="chef-input" rows={1} placeholder={chefTargetLabel ? `Adjust ${chefTargetLabel}…` : 'Ask the chef to adjust…'} value={chefInput} onChange={event => setChefInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); const value = chefInput; setChefInput(''); void submitChef(value); } }} /><button id="chef-send" className="chef-send" type="button" disabled={!chefInput.trim() || state.chefThinking} onClick={() => { const value = chefInput; setChefInput(''); void submitChef(value); }}>Send</button></div>
       </aside>
 
+      <CommandPalette open={state.paletteOpen} actions={dashboardActions} onClose={() => dispatch({ type: 'patch', value: { paletteOpen: false } })} />
       <AssumptionsDialog state={state} onClose={() => dispatch({ type: 'patch', value: { assumptionsWidgetIndex: null } })} onApply={applyAssumption} />
-      <InspectorDialog state={state} onClose={() => dispatch({ type: 'patch', value: { inspector: null } })} />
+      <InspectorDialog state={state} onClose={() => dispatch({ type: 'patch', value: { inspector: null } })} onFocusValue={applyEqualsFocus} />
       <DataHealthDialog
         open={state.healthOpen}
         health={state.parseHealth}
@@ -1753,26 +1971,6 @@ function App() {
         onClose={() => dispatch({ type: 'patch', value: { healthOpen: false } })}
         onCorrect={issue => updateHealthIssue(issue, true)}
         onIgnore={issue => updateHealthIssue(issue, false)}
-      />
-      <ExecutiveBriefDialog
-        open={state.briefOpen}
-        brief={executiveBrief}
-        onClose={() => dispatch({ type: 'patch', value: { briefOpen: false } })}
-        onInspect={widget => {
-          dispatch({ type: 'patch', value: { briefOpen: false } });
-          openInspector(widget, null);
-        }}
-        onCopy={markdown => void copyExecutiveBrief(markdown)}
-      />
-      <RecipeInspectorDialog
-        open={state.recipeInspectorOpen}
-        recipe={state.recipe}
-        schema={state.schema}
-        dataSource={state.dataSource}
-        parseHealth={state.parseHealth}
-        schemaOverrides={state.schemaOverrides}
-        excludeOutliers={state.excludeOutliers}
-        onClose={() => dispatch({ type: 'patch', value: { recipeInspectorOpen: false } })}
       />
       <AlertsDialog
         open={state.alertsOpen}
@@ -1786,6 +1984,7 @@ function App() {
       />
       <AnalysisWorkbench
         open={state.workbenchOpen}
+        initialTab={state.workbenchTab}
         rows={focusedRows}
         allRows={state.rows}
         schema={state.schema}
@@ -1795,6 +1994,11 @@ function App() {
         kpiGoals={state.kpiGoals}
         dashboardNotes={state.dashboardNotes}
         excludeOutliers={state.excludeOutliers}
+        theme={state.theme}
+        brief={executiveBrief}
+        dataSource={state.dataSource}
+        parseHealth={state.parseHealth}
+        schemaOverrides={state.schemaOverrides}
         onClose={() => dispatch({ type: 'patch', value: { workbenchOpen: false } })}
         onFilters={filters => updateWorkbench({ filters })}
         onSavedViews={savedViews => updateWorkbench({ savedViews })}
@@ -1810,6 +2014,12 @@ function App() {
         }}
         onExport={exportDashboardBundle}
         onImport={importDashboardBundle}
+        onTheme={setDashboardTheme}
+        onInspectBrief={widget => {
+          dispatch({ type: 'patch', value: { workbenchOpen: false } });
+          openInspector(widget, null);
+        }}
+        onCopyBrief={markdown => void copyExecutiveBrief(markdown)}
       />
     </>
   );

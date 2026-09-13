@@ -3,6 +3,7 @@ export type ProductEvent =
   | 'dashboard_rendered'
   | 'assumption_edited'
   | 'chart_inspected'
+  | 'focus_from_chart'
   | 'chef_edit'
   | 'recurring_refresh'
   | 'export_created'
@@ -16,6 +17,7 @@ const ALLOWED_PROPERTIES: Record<ProductEvent, Set<string>> = {
   dashboard_rendered: new Set(['source', 'fallback', 'widgets']),
   assumption_edited: new Set(['widgetType']),
   chart_inspected: new Set(['widgetType']),
+  focus_from_chart: new Set(['widgetType']),
   chef_edit: new Set(['scope', 'success']),
   recurring_refresh: new Set(['result', 'triggered']),
   export_created: new Set(['type']),

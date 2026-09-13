@@ -39,34 +39,26 @@ function widgetAssumptions(widget: DashboardRecipe['widgets'][number]): string {
   return widget.type;
 }
 
-export function RecipeInspectorDialog({
-  open,
+export function RecipeInspectorPanel({
   recipe,
   schema,
   dataSource,
   parseHealth,
   schemaOverrides,
   excludeOutliers,
-  onClose,
 }: {
-  open: boolean;
   recipe: DashboardRecipe | null;
   schema: SchemaColumn[];
   dataSource: DataSource | null;
   parseHealth: ParseHealth | null;
   schemaOverrides: SchemaOverrides;
   excludeOutliers: boolean;
-  onClose: () => void;
 }) {
-  const ref = useDialog(open);
-  if (!recipe) return null;
+  if (!recipe) return <section id="recipe-inspector" className="workbench-section"><p>Open a dashboard to inspect its recipe.</p></section>;
   return (
-    <dialog id="recipe-inspector-dialog" className="mise-dialog insight-dialog" ref={ref} onClose={onClose}>
-      <div className="dialog-head">
-        <div><div className="eyebrow eyebrow-accent">Recipe inspector</div><h2>{recipe.title}</h2></div>
-        <CloseButton onClose={() => ref.current?.close()} />
-      </div>
-      <div className="dialog-body">
+    <section id="recipe-inspector" className="workbench-section insight-panel">
+      <div className="workbench-intro"><div><span className="eyebrow">Recipe inspector</span><h3>{recipe.title}</h3></div></div>
+      <div>
         <div className="recipe-source">
           <span className="eyebrow">Source</span>
           <strong>{dataSource?.type === 'http' ? 'HTTP data' : 'Browser-local data'}</strong>
@@ -97,32 +89,27 @@ export function RecipeInspectorDialog({
           ))}
         </div>
       </div>
-    </dialog>
+    </section>
   );
 }
 
-export function ExecutiveBriefDialog({
-  open,
+export function ExecutiveBriefPanel({
   brief,
-  onClose,
   onInspect,
   onCopy,
 }: {
-  open: boolean;
   brief: ExecutiveBrief | null;
-  onClose: () => void;
   onInspect: (widget: KpiWidget) => void;
   onCopy: (markdown: string) => void;
 }) {
-  const ref = useDialog(open);
-  if (!brief) return null;
+  if (!brief) return <section id="executive-brief" className="workbench-section"><p>Open a dashboard to read its brief.</p></section>;
   return (
-    <dialog id="executive-brief-dialog" className="mise-dialog insight-dialog" ref={ref} onClose={onClose}>
-      <div className="dialog-head">
-        <div><div className="eyebrow eyebrow-accent">Executive brief</div><h2>{brief.title}</h2></div>
-        <CloseButton onClose={() => ref.current?.close()} />
+    <section id="executive-brief" className="workbench-section insight-panel">
+      <div className="workbench-intro">
+        <div><span className="eyebrow">Executive brief</span><h3>{brief.title}</h3></div>
+        <button id="copy-brief" type="button" className="btn btn-primary" onClick={() => onCopy(executiveBriefMarkdown(brief))}>Copy Markdown</button>
       </div>
-      <div className="dialog-body">
+      <div>
         <p className="brief-summary">{brief.summary}</p>
         <div id="brief-claims" className="brief-claims">
           {brief.claims.map(claim => (
@@ -134,9 +121,8 @@ export function ExecutiveBriefDialog({
           ))}
         </div>
         {brief.health && <p className="brief-health">{brief.health}</p>}
-        <div className="dialog-actions"><button id="copy-brief" type="button" className="btn btn-primary" onClick={() => onCopy(executiveBriefMarkdown(brief))}>Copy Markdown</button></div>
       </div>
-    </dialog>
+    </section>
   );
 }
 
@@ -179,9 +165,9 @@ export function AlertsDialog({
     event.currentTarget.reset();
   };
   return (
-    <dialog id="alerts-dialog" className="mise-dialog insight-dialog" ref={ref} onClose={onClose}>
+    <dialog id="alerts-dialog" className="mise-dialog insight-dialog" ref={ref} aria-labelledby="alerts-title" onClose={onClose}>
       <div className="dialog-head">
-        <div><div className="eyebrow eyebrow-accent">While-open alerts</div><h2>Local metric thresholds</h2></div>
+        <div><div className="eyebrow eyebrow-accent">While-open alerts</div><h2 id="alerts-title">Local metric thresholds</h2></div>
         <CloseButton onClose={() => ref.current?.close()} />
       </div>
       <div className="dialog-body">

@@ -123,6 +123,52 @@ emits content-hashed assets, and the PNG renderer is bundled as a lazy chunk.
 - Presentation mode removes editing chrome for reviews and screen sharing.
 - Portable dashboard backups restore rows, recipes, views, goals, notes, and theme.
 
+### Action hierarchy
+
+- One action table describes every document-level action once; header menus,
+  keyboard shortcuts, and the command palette read from it.
+- The dashboard header shows a save-state pill, compact undo/redo only when
+  history exists, Data and Export menus, and Present; the landing page shows
+  only the wordmark and breadcrumb.
+- HTTP-only actions such as Refresh data and Alerts are omitted for local
+  datasets instead of rendered disabled.
+- The dashboard head keeps a single Analyze button; the executive brief and
+  recipe inspector became workbench tabs and the theme picker moved to Notes.
+- Cmd/Ctrl+K opens a command palette that reaches every action and workbench
+  tab; Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z, `/`, `P`, and Escape work on the dashboard.
+- Each widget card keeps a single `⋯` menu for view rows, assumptions, rationale,
+  rename, layout, Chef, and table export; meta stays as muted text.
+- Observations render after the leading KPI run and collapse past two notes so
+  KPI values stay above the fold.
+- Widget titles and the dashboard title rename inline (double-click, Enter, or
+  F2); empty titles revert and the change is undoable.
+- Widgets reorder by dragging a handle on fine pointers; keyboard users keep
+  Move earlier/later. Touch hides the handle and keeps the `⋯` trigger at 44px.
+- Clicking a chart value opens the row inspector with Focus dashboard on
+  `{column} = {value}`; that path writes one equals filter per column so the
+  first focus stays discoverable.
+- Once a chart is the focus source, it stays unfiltered on its own dimension:
+  the selected group keeps full colour, the rest dim, and a click moves focus
+  or clears the filter without reopening the inspector. Other widgets keep the
+  focused rows.
+- On viewports ≤720px the header is sticky and 48px tall: mark, a truncated
+  breadcrumb, and a status pill reduced to its dot plus Saved / Refreshing… /
+  Stale / Failed. Data, Export, Present, undo/redo, and the ⌘K hint move out of
+  the header.
+- The dashboard stage gets a four-target bottom bar (Analyze, Chef, Export,
+  More) built from the action table; Export and More open `Menu` as a bottom
+  sheet. `#chef-fab` is hidden at this width. The bar is absent on desktop, in
+  presentation mode, and while the Chef panel or workbench is open.
+- Phone widgets are full width with no page-level horizontal scroll; KPIs pair
+  two-up between 480px and 720px; tables scroll inside the card. The landing page
+  still shows only the mark and breadcrumb.
+- Active filters render as dismissible chips in the dashboard head (`Focused · n
+  of N rows`); chip text stays visible in presentation mode while × and Clear all
+  hide with the rest of the chrome.
+- Chef empty-state suggestions and a Try next row after a successful reply come
+  from schema-aware `buildFollowUpQuestions`, including prompts grounded in the
+  actual donut, table, KPI, and observations widgets on the plate.
+
 ## Architecture boundaries
 
 ### Paid and collaborative capabilities

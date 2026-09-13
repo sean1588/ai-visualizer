@@ -4,10 +4,11 @@ import type {
   DashboardRecipe,
   KpiAggregate,
   KpiWidget,
+  RenderedWidget,
   Row,
   SchemaColumn,
 } from './types.ts';
-import { widgetFingerprint } from './widgets.ts';
+import { inspectedColumn, widgetFingerprint } from './widgets.ts';
 
 export type FilterOperator = 'equals' | 'contains' | 'at-least' | 'at-most' | 'after' | 'before';
 
@@ -75,6 +76,37 @@ export function filterOperators(column: SchemaColumn | undefined): FilterOperato
   return column ? OPERATOR_TYPES[column.type] : ['contains'];
 }
 
+const OPERATOR_LABELS: Record<FilterOperator, string> = {
+  equals: 'is',
+  contains: 'contains',
+  'at-least': '≥',
+  'at-most': '≤',
+  after: 'after',
+  before: 'before',
+};
+
+export function operatorLabel(operator: FilterOperator): string {
+  return OPERATOR_LABELS[operator];
+}
+
+export function setEqualsFilter(
+  filters: readonly DashboardFilter[],
+  column: string,
+  value: unknown,
+  id: string,
+): DashboardFilter[] {
+  const nextValue = comparableValue(value);
+  const existingIndex = filters.findIndex(filter => filter.column === column && filter.operator === 'equals');
+  if (existingIndex >= 0) {
+    const existing = filters[existingIndex];
+    if (comparableValue(existing.value).toLocaleLowerCase() === nextValue.toLocaleLowerCase()) {
+      return filters as DashboardFilter[];
+    }
+    return filters.map((filter, index) => (index === existingIndex ? { ...filter, value: nextValue } : filter));
+  }
+  return [...filters, { id, column, operator: 'equals', value: nextValue }];
+}
+
 function comparableValue(value: unknown): string {
   if (value === null || value === undefined) return '';
   if (typeof value === 'object') return JSON.stringify(value);
@@ -122,6 +154,19 @@ export function applyDashboardFilters(
 ): Row[] {
   if (!Array.isArray(filters) || !filters.length) return [...rows];
   return rows.filter(row => filters.every(filter => matchesFilter(row, filter, schema)));
+}
+
+export function rowsForWidget(
+  widget: RenderedWidget,
+  rows: readonly Row[],
+  filters: readonly DashboardFilter[],
+  schema: readonly SchemaColumn[],
+): Row[] {
+  const ownColumn = inspectedColumn(widget);
+  const applied = !ownColumn
+    ? filters
+    : filters.filter(filter => filter.operator !== 'equals' || filter.column !== ownColumn);
+  return applyDashboardFilters(rows, applied, schema);
 }
 
 export function evaluateKpiGoals(
@@ -269,6 +314,41 @@ export function buildFollowUpQuestions(
   const primary = numbers[0];
   const secondary = numbers[1];
   const questions: FollowUpQuestion[] = [];
+  const table = recipe.widgets.find(widget => widget.type === 'table');
+  const donut = recipe.widgets.find(widget => widget.type === 'donut');
+  if (donut) {
+    questions.push({
+      id: 'swap-donut',
+      label: `Swap the ${donut.title} donut for a bar chart`,
+      prompt: `Swap the ${donut.title} donut for a bar chart`,
+      reason: 'The dashboard already has a donut that can be compared as bars.',
+    });
+  }
+  if (table && primary) {
+    questions.push({
+      id: 'sort-table',
+      label: `Sort ${table.title} by ${primary.name} descending, top 20`,
+      prompt: `Sort ${table.title} by ${primary.name} descending, top 20`,
+      reason: 'The table can highlight the largest rows.',
+    });
+  }
+  const kpis = recipe.widgets.filter((widget): widget is KpiWidget => widget.type === 'kpi');
+  if (kpis.length >= 3) {
+    questions.push({
+      id: 'hero-kpi',
+      label: `Promote ${kpis[0].label} to a full-width hero`,
+      prompt: `Promote ${kpis[0].label} to a full-width hero`,
+      reason: 'Several KPIs are on the plate; one can lead.',
+    });
+  }
+  if (recipe.widgets.some(widget => widget.type === 'observations')) {
+    questions.push({
+      id: 'hide-observations',
+      label: 'Hide the observations',
+      prompt: 'Hide the observations',
+      reason: 'The tasting notes can be hidden without changing the metrics.',
+    });
+  }
   if (date && primary) {
     questions.push({
       id: 'trend',
@@ -293,7 +373,6 @@ export function buildFollowUpQuestions(
       reason: 'Two numeric measures can reveal a useful relationship.',
     });
   }
-  const table = recipe.widgets.find(widget => widget.type === 'table');
   if (table && primary) {
     questions.push({
       id: 'top-records',
@@ -302,7 +381,7 @@ export function buildFollowUpQuestions(
       reason: 'The dashboard already includes row-level detail.',
     });
   }
-  return questions.slice(0, 4);
+  return questions;
 }
 
 export function kpiGoalsFromRecipe(recipe: DashboardRecipe): KpiWidget[] {
