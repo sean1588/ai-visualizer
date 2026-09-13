@@ -302,6 +302,7 @@ test("action hierarchy keeps the landing header quiet and the palette reaches ev
     assert.equal(await page.locator("#recipe-undo").count(), 0);
     assert.equal(await page.locator(".dash-head .btn").count(), 1, "the head keeps a single Analyze button");
     assert.equal(await page.locator("#open-workbench").textContent(), "Analyze");
+    assert.equal(await page.locator("#mobile-analyze").count(), 0, "the mobile action bar does not render on desktop");
     assert.equal(await page.locator(".dash-head select").count(), 0);
 
     await page.locator("#data-menu").click();
@@ -497,32 +498,86 @@ test("Chef history resets when restoring another saved dashboard", async () => {
   }, { allowConsole: /AI response did not validate, falling back/ });
 });
 
-test("mobile dashboard stacks without horizontal overflow and uses compact Chef button", async () => {
+test("mobile dashboard fold uses a bottom action bar without horizontal overflow", async () => {
   await withPage(async page => {
-    await page.setViewportSize(devices["iPhone 14 Pro"].viewport);
     await mockInference(page);
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    assert.ok(await page.locator("#drop").isVisible());
+    assert.ok(await page.locator("#crumb").isVisible());
+    assert.ok(await page.locator(".example-gallery").isVisible());
+    assert.equal(await page.locator("header.top #data-menu").count(), 0);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.getByText("SAAS METRICS").click();
-    await page.waitForSelector("#chef-fab.is-visible");
+    await page.waitForSelector("#mobile-analyze");
 
     const metrics = await page.evaluate(() => {
-      const fab = document.querySelector("#chef-fab");
-      const label = fab?.querySelector("span:last-child");
-      const rect = fab?.getBoundingClientRect();
+      const title = document.querySelector("#dash-title");
+      const kpi = document.querySelector(".w-kpi .value");
+      const bar = document.querySelector("#mobile-action-bar");
+      const header = document.querySelector("header.top");
       return {
         width: innerWidth,
+        height: innerHeight,
         scrollWidth: document.documentElement.scrollWidth,
-        fabLabelDisplay: label ? getComputedStyle(label).display : null,
-        fabWidth: rect?.width,
-        fabHeight: rect?.height,
+        titleBottom: title?.getBoundingClientRect().bottom ?? null,
+        kpiBottom: kpi?.getBoundingClientRect().bottom ?? null,
+        headerHeight: header?.getBoundingClientRect().height ?? null,
+        barTargets: [...(bar?.querySelectorAll(":scope > button, :scope > .menu > summary") || [])].map(el => {
+          const rect = el.getBoundingClientRect();
+          return { id: el.id, height: rect.height, width: rect.width };
+        }),
       };
     });
 
-    assert.equal(metrics.scrollWidth, metrics.width);
-    assert.equal(metrics.fabLabelDisplay, "none");
-    assert.equal(metrics.fabWidth, 46);
-    assert.equal(metrics.fabHeight, 46);
-  });
+    assert.equal(metrics.scrollWidth <= metrics.width, true);
+    assert.ok(metrics.headerHeight <= 48);
+    assert.ok(metrics.titleBottom > 0 && metrics.titleBottom <= metrics.height);
+    assert.ok(metrics.kpiBottom > 0 && metrics.kpiBottom <= metrics.height);
+    assert.equal(await page.locator("header.top #data-menu").count(), 0);
+    assert.equal(await page.locator("header.top #export-menu").count(), 0);
+    assert.equal(await page.locator("#chef-fab").isVisible(), false);
+    assert.equal(metrics.barTargets.length, 4);
+    for (const target of metrics.barTargets) {
+      assert.ok(target.height >= 44, `${target.id} height ${target.height}`);
+      assert.ok(target.width >= 44, `${target.id} width ${target.width}`);
+    }
+
+    await page.locator("#mobile-analyze").click();
+    await page.waitForSelector("#analysis-workbench[open]");
+    assert.equal(await page.locator("#mobile-action-bar").isVisible(), false);
+    await page.locator("#analysis-workbench .dialog-close").click();
+    await page.waitForFunction(() => !document.querySelector("#analysis-workbench")?.hasAttribute("open"));
+    await page.waitForSelector("#mobile-analyze");
+
+    await openMobileSheet(page, "#mobile-export");
+    const exportSheet = await page.locator("details.menu-sheet[open] .menu-list").innerText();
+    assert.match(exportSheet, /Export PNG/);
+    assert.match(exportSheet, /Interactive HTML/);
+    assert.match(exportSheet, /Recipe JSON/);
+    assert.match(exportSheet, /Copy recipe link/);
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("details.menu-sheet[open]"));
+
+    await openMobileSheet(page, "#mobile-more");
+    const moreSheet = await page.locator("details.menu-sheet[open] .menu-list").innerText();
+    assert.match(moreSheet, /Replace data/);
+    assert.match(moreSheet, /Present/);
+    await page.getByRole("menuitem", { name: /Present/ }).click();
+    await page.waitForFunction(() => document.body.classList.contains("presentation-mode"));
+    assert.equal(await page.locator("#mobile-action-bar").isVisible(), false);
+    assert.equal(await page.locator("#chef-fab").isVisible(), false);
+    await page.locator("#exit-presentation").click();
+    await page.waitForFunction(() => !document.body.classList.contains("presentation-mode"));
+    await page.waitForSelector("#mobile-analyze");
+
+    await page.locator("#mobile-chef").click();
+    await page.waitForSelector("#chef-panel.is-open");
+    assert.equal(await page.locator("#mobile-action-bar").isVisible(), false);
+    assert.equal(await page.locator("#chef-fab").isVisible(), false);
+    await page.locator("#chef-close").click();
+    await page.waitForFunction(() => !document.querySelector("#chef-panel")?.classList.contains("is-open"));
+    await page.waitForSelector("#mobile-analyze");
+  }, { context: { ...devices["iPhone 13"] } });
 });
 
 test("coarse-pointer controls meet the 44px touch target baseline", async () => {
@@ -531,13 +586,12 @@ test("coarse-pointer controls meet the 44px touch target baseline", async () => 
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
     assert.ok(await page.locator("#browse-btn").evaluate(element => element.getBoundingClientRect().height) >= 44);
     await page.getByText("SAAS METRICS").click();
-    await page.waitForSelector("#chef-fab.is-visible");
+    await page.waitForSelector("#mobile-analyze");
     assert.ok(await page.locator(".widget-menu-trigger").first().evaluate(element => element.getBoundingClientRect().height) >= 44);
-    assert.ok(await page.locator("#data-menu").evaluate(element => element.getBoundingClientRect().height) >= 44);
-    await page.locator("#data-menu").click();
+    await page.locator("#mobile-more").click();
     assert.ok(await page.locator("#replace-data-btn").evaluate(element => element.getBoundingClientRect().height) >= 44);
     await page.keyboard.press("Escape");
-    await page.locator("#open-workbench").click();
+    await page.locator("#mobile-analyze").click();
     assert.ok(await page.locator(".workbench-tabs button").first().evaluate(element => element.getBoundingClientRect().height) >= 44);
     assert.ok(await page.locator("#focus-filter-form select").first().evaluate(element => element.getBoundingClientRect().height) >= 44);
     await page.getByRole("button", { name: "Goals" }).click();
@@ -1754,6 +1808,11 @@ async function clickMenuItem(page, menuId, itemSelector) {
   await page.locator(menuId).click();
   await page.waitForSelector(`${itemSelector}:visible`);
   await page.locator(itemSelector).click();
+}
+
+async function openMobileSheet(page, summaryId) {
+  await page.locator(summaryId).click();
+  await page.waitForSelector("details.menu-sheet[open] .menu-list");
 }
 
 async function openWorkbenchTab(page, label) {
