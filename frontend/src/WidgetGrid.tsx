@@ -1,4 +1,4 @@
-import { createContext, useContext, type MouseEvent } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type SyntheticEvent } from 'react';
 
 import {
   aggregateBy,
@@ -12,6 +12,7 @@ import {
   metricValues,
   seriesBy,
   sortTableRows,
+  widgetDisplayOrder,
   widgetFingerprint,
   type DashboardRecipe,
   type GroupedWidget,
@@ -39,19 +40,195 @@ interface WidgetGridProps {
   onRetry: () => void;
   onExportTable: (widget: TableWidget) => void;
   onCopyTable: (widget: TableWidget) => void;
-  onEditWidget: (index: number, action: WidgetEditAction) => void;
+  onEditWidget: (index: number, action: WidgetEditAction, payload?: string) => void;
   onChefWidget: (index: number) => void;
 }
 
-export type WidgetEditAction = 'move-up' | 'move-down' | 'resize' | 'duplicate' | 'remove';
+export type WidgetEditAction = 'move-up' | 'move-down' | 'resize' | 'duplicate' | 'remove' | 'rename' | 'move-to';
 
 interface WidgetEditor {
   count: number;
-  onEdit: (index: number, action: WidgetEditAction) => void;
+  renamingIndex: number | null;
+  setRenamingIndex: (index: number | null) => void;
+  onEdit: (index: number, action: WidgetEditAction, payload?: string) => void;
   onChef: (index: number) => void;
 }
 
+interface WidgetDragState {
+  from: number;
+  over: number | null;
+  before: boolean;
+  axis: 'x' | 'y';
+}
+
+interface WidgetDnd {
+  drag: WidgetDragState | null;
+  onHandleDragStart: (index: number, event: DragEvent<HTMLElement>) => void;
+  onHandleDragEnd: () => void;
+  onCardDragOver: (index: number, event: DragEvent<HTMLDivElement>) => void;
+  onCardDrop: (index: number, event: DragEvent<HTMLDivElement>) => void;
+}
+
 const WidgetEditorContext = createContext<WidgetEditor | null>(null);
+const WidgetDndContext = createContext<WidgetDnd | null>(null);
+
+function widgetLabel(widget: RenderedWidget): string {
+  if (widget.type === 'kpi') return widget.label;
+  if (widget.type === 'observations') return widget.title || 'What stood out';
+  return widget.title || humanize(widget.type);
+}
+
+function dropInsertsBefore(event: { clientX: number; clientY: number }, target: HTMLElement): { before: boolean; axis: 'x' | 'y' } {
+  const rect = target.getBoundingClientRect();
+  const midX = rect.left + rect.width / 2;
+  const midY = rect.top + rect.height / 2;
+  const axis: 'x' | 'y' = Math.abs(event.clientX - midX) > Math.abs(event.clientY - midY) ? 'x' : 'y';
+  const before = axis === 'x' ? event.clientX < midX : event.clientY < midY;
+  return { before, axis };
+}
+
+function destinationIndex(from: number, target: number, before: boolean): number {
+  let destination = before ? target : target + 1;
+  if (from < destination) destination -= 1;
+  return destination;
+}
+
+function widgetCardClass(base: string, index: number, drag: WidgetDragState | null): string {
+  const extras = [
+    drag?.from === index ? 'is-dragging' : '',
+    drag?.over === index ? `drop-${drag.before ? 'before' : 'after'}-${drag.axis}` : '',
+  ].filter(Boolean);
+  return [base, ...extras].join(' ');
+}
+
+function useWidgetCard(index: number) {
+  const dnd = useContext(WidgetDndContext);
+  return {
+    className: (base: string) => widgetCardClass(base, index, dnd?.drag ?? null),
+    props: {
+      'data-widget-index': index,
+      onDragOver: (event: DragEvent<HTMLDivElement>) => dnd?.onCardDragOver(index, event),
+      onDrop: (event: DragEvent<HTMLDivElement>) => dnd?.onCardDrop(index, event),
+    },
+  };
+}
+
+export function InlineRename({
+  value,
+  as: Tag = 'h3',
+  id,
+  className,
+  editing: editingProp,
+  onEditingChange,
+  onCommit,
+}: {
+  value: string;
+  as?: 'h1' | 'h3' | 'div';
+  id?: string;
+  className?: string;
+  editing?: boolean;
+  onEditingChange?: (editing: boolean) => void;
+  onCommit: (value: string) => void;
+}) {
+  const [internal, setInternal] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const skipBlur = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const editing = editingProp ?? internal;
+  const setEditing = (next: boolean) => {
+    if (onEditingChange) onEditingChange(next);
+    else setInternal(next);
+  };
+
+  useEffect(() => {
+    if (!editing) {
+      setDraft(value);
+      skipBlur.current = false;
+    }
+  }, [editing, value]);
+
+  useEffect(() => {
+    if (!editing) return;
+    const input = inputRef.current;
+    input?.focus();
+    input?.select();
+  }, [editing]);
+
+  const commit = () => {
+    const next = draft.trim();
+    setEditing(false);
+    if (!next || next === value) return;
+    onCommit(next);
+  };
+  const cancel = () => {
+    skipBlur.current = true;
+    setDraft(value);
+    setEditing(false);
+  };
+  const start = () => setEditing(true);
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        id={id}
+        className={['inline-rename-input', className].filter(Boolean).join(' ')}
+        aria-label={`Rename ${value}`}
+        value={draft}
+        onChange={event => setDraft(event.target.value)}
+        onBlur={() => {
+          if (skipBlur.current) {
+            skipBlur.current = false;
+            return;
+          }
+          commit();
+        }}
+        onKeyDown={event => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            commit();
+          }
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            cancel();
+          }
+        }}
+      />
+    );
+  }
+
+  return (
+    <Tag
+      id={id}
+      className={className}
+      tabIndex={0}
+      onDoubleClick={start}
+      onKeyDown={event => {
+        if (event.key === 'F2' || event.key === 'Enter') {
+          event.preventDefault();
+          start();
+        }
+      }}
+    >
+      {value}
+    </Tag>
+  );
+}
+
+function WidgetTitle({ widget, index }: { widget: RenderedWidget; index: number }) {
+  const editor = useContext(WidgetEditorContext);
+  const value = widgetLabel(widget);
+  return (
+    <InlineRename
+      as={widget.type === 'kpi' ? 'div' : 'h3'}
+      className={widget.type === 'kpi' ? 'label' : undefined}
+      value={value}
+      editing={editor?.renamingIndex === index}
+      onEditingChange={next => editor?.setRenamingIndex(next ? index : null)}
+      onCommit={next => editor?.onEdit(index, 'rename', next)}
+    />
+  );
+}
 
 function assumptionText(widget: RenderedWidget): string {
   if (widget.type === 'kpi') return `${widget.aggregate || 'last'} · ${widget.metric} · ${widget.format || 'auto'}`;
@@ -80,6 +257,8 @@ function WidgetActions({
   inspect = true,
   onAssumptions,
   onInspect,
+  onExport,
+  onCopy,
 }: {
   widget: RenderedWidget;
   index: number;
@@ -87,48 +266,121 @@ function WidgetActions({
   inspect?: boolean;
   onAssumptions: (index: number) => void;
   onInspect: (widget: RenderedWidget, selectedValue: unknown | null) => void;
+  onExport?: (widget: TableWidget) => void;
+  onCopy?: (widget: TableWidget) => void;
 }) {
   const assumptions = assumptionText(widget);
   const editor = useContext(WidgetEditorContext);
-  const edit = (action: WidgetEditAction, event: MouseEvent<HTMLButtonElement>) => {
-    event.currentTarget.closest('details')?.removeAttribute('open');
-    editor?.onEdit(index, action);
+  const dnd = useContext(WidgetDndContext);
+  const menuRef = useRef<HTMLDetailsElement>(null);
+  const title = widgetLabel(widget);
+  const triggerId = `widget-menu-${index}`;
+  const fingerprint = widgetFingerprint(widget);
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const details = menuRef.current;
+      if (details?.open && event.target instanceof Node && !details.contains(event.target)) details.removeAttribute('open');
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, []);
+
+  const close = () => {
+    const details = menuRef.current;
+    if (!details) return;
+    details.removeAttribute('open');
+    details.querySelector<HTMLElement>('summary')?.focus();
   };
+  const handleToggle = (event: SyntheticEvent<HTMLDetailsElement>) => {
+    if (!event.currentTarget.open) return;
+    document.querySelectorAll<HTMLDetailsElement>('details.menu[open]').forEach(other => {
+      if (other !== event.currentTarget) other.removeAttribute('open');
+    });
+  };
+  const handleKeyDown = (event: KeyboardEvent<HTMLDetailsElement>) => {
+    const details = menuRef.current;
+    if (!details?.open) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const buttons = Array.from(details.querySelectorAll<HTMLButtonElement>('.menu-list button:not(:disabled)'));
+      if (!buttons.length) return;
+      const index = buttons.findIndex(button => button === document.activeElement);
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      buttons[(index + step + buttons.length) % buttons.length].focus();
+    }
+  };
+  const edit = (action: WidgetEditAction, payload?: string) => {
+    close();
+    editor?.onEdit(index, action, payload);
+  };
+
   return (
     <div className="w-actions">
       {meta && <span className="meta">{meta}</span>}
-      {inspect && (
-        <button type="button" className="widget-action" data-inspect-widget={widgetFingerprint(widget)} onClick={() => onInspect(widget, null)}>
-          View rows
-        </button>
-      )}
-      {assumptions && (
-        <button
-          type="button"
-          className="assumption-chip"
-          data-edit-assumptions={widgetFingerprint(widget)}
-          title={widget.rationale}
-          onClick={() => onAssumptions(index)}
+      {editor && (
+        <span
+          className="widget-drag-handle"
+          draggable
+          aria-hidden="true"
+          onDragStart={event => dnd?.onHandleDragStart(index, event)}
+          onDragEnd={() => dnd?.onHandleDragEnd()}
         >
-          {assumptions}
-        </button>
-      )}
-      {widget.rationale && (
-        <details className="widget-rationale">
-          <summary>Why this?</summary>
-          <p>{widget.rationale}</p>
-        </details>
+          ⋮⋮
+        </span>
       )}
       {editor && (
-        <details className="widget-edit">
-          <summary>Edit</summary>
-          <div className="widget-edit-menu">
-            <button type="button" disabled={index === 0} onClick={event => edit('move-up', event)}>Move earlier</button>
-            <button type="button" disabled={index === editor.count - 1} onClick={event => edit('move-down', event)}>Move later</button>
-            <button type="button" disabled={widget.type === 'table' || widget.type === 'observations'} onClick={event => edit('resize', event)}>Resize · {widget.span}/12</button>
-            <button type="button" onClick={event => edit('duplicate', event)}>Duplicate</button>
-            <button type="button" disabled={editor.count === 1} onClick={event => edit('remove', event)}>Remove</button>
-            <button type="button" onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); editor.onChef(index); }}>Ask the Chef</button>
+        <details className="menu widget-menu" ref={menuRef} onToggle={handleToggle} onKeyDown={handleKeyDown}>
+          <summary id={triggerId} className="widget-menu-trigger" aria-haspopup="menu" aria-label={`Widget actions for ${title}`}>⋯</summary>
+          <div className="menu-list" role="menu" aria-labelledby={triggerId}>
+            {inspect && (
+              <button
+                type="button"
+                role="menuitem"
+                data-inspect-widget={fingerprint}
+                onClick={() => { close(); onInspect(widget, null); }}
+              >
+                View rows
+              </button>
+            )}
+            {assumptions && (
+              <button
+                type="button"
+                role="menuitem"
+                data-edit-assumptions={fingerprint}
+                title={widget.rationale}
+                onClick={() => { close(); onAssumptions(index); }}
+              >
+                Assumptions · {assumptions}
+              </button>
+            )}
+            {widget.rationale && (
+              <details className="widget-rationale">
+                <summary>Why this?</summary>
+                <p>{widget.rationale}</p>
+              </details>
+            )}
+            <button type="button" role="menuitem" data-widget-rename={fingerprint} onClick={() => { close(); editor.setRenamingIndex(index); }}>Rename…</button>
+            <button type="button" role="menuitem" disabled={index === 0} onClick={() => edit('move-up')}>Move earlier</button>
+            <button type="button" role="menuitem" disabled={index === editor.count - 1} onClick={() => edit('move-down')}>Move later</button>
+            {widget.type !== 'table' && widget.type !== 'observations' && (
+              <button type="button" role="menuitem" onClick={() => edit('resize')}>Resize · {widget.span}/12</button>
+            )}
+            <button type="button" role="menuitem" onClick={() => edit('duplicate')}>Duplicate</button>
+            <button type="button" role="menuitem" disabled={editor.count === 1} onClick={() => edit('remove')}>Remove</button>
+            <button type="button" role="menuitem" onClick={() => { close(); editor.onChef(index); }}>Ask the Chef</button>
+            {widget.type === 'table' && onExport && (
+              <button type="button" role="menuitem" data-export-csv={fingerprint} onClick={() => { close(); onExport(widget); }}>CSV ↓</button>
+            )}
+            {widget.type === 'table' && onCopy && (
+              <button type="button" role="menuitem" data-copy-md={fingerprint} onClick={() => { close(); onCopy(widget); }}>Copy MD</button>
+            )}
           </div>
         </details>
       )}
@@ -227,10 +479,11 @@ function KpiCard({
   );
   const spark = widget.sparkCol ? metricValues(widget.sparkCol, rows, schema) : [];
   const changed = comparison && comparison.absoluteChange !== 0;
+  const card = useWidgetCard(index);
   return (
-    <div className={`w w-kpi${changed ? ' has-data-change' : ''}`} style={{ gridColumn: `span ${widget.span}` }}>
+    <div className={card.className(`w w-kpi${changed ? ' has-data-change' : ''}`)} style={{ gridColumn: `span ${widget.span}` }} {...card.props}>
       <div className="kpi-top">
-        <div className="label">{widget.label}</div>
+        <WidgetTitle widget={widget} index={index} />
         <WidgetActions widget={widget} index={index} onAssumptions={onAssumptions} onInspect={onInspect} />
       </div>
       <div className="value">{computed.value}</div>
@@ -264,21 +517,58 @@ function KpiCard({
   );
 }
 
-function ObservationsCard({ widget }: { widget: ObservationsWidget }) {
+function ObservationItem({ index, observation }: { index: number; observation: string }) {
   return (
-    <div className="w w-obs" style={{ gridColumn: `span ${widget.span}` }}>
+    <li className="obs-item">
+      <span className="obs-num">{String(index + 1).padStart(2, '0')}</span>
+      <span className="obs-text">{observation}</span>
+    </li>
+  );
+}
+
+function ObservationsCard({
+  widget,
+  index,
+  onAssumptions,
+  onInspect,
+}: {
+  widget: ObservationsWidget;
+  index: number;
+  onAssumptions: (index: number) => void;
+  onInspect: (widget: RenderedWidget, selectedValue: unknown | null) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const card = useWidgetCard(index);
+  const collapse = widget.observations.length > 2;
+  const visible = collapse ? widget.observations.slice(0, 2) : widget.observations;
+  const extra = collapse ? widget.observations.slice(2) : [];
+  return (
+    <div className={card.className('w w-obs')} style={{ gridColumn: `span ${widget.span}` }} {...card.props}>
       <div className="w-hd">
-        <h3>What stood out</h3>
-        <span className="meta">computed profile · {widget.observations.length} note{widget.observations.length === 1 ? '' : 's'}</span>
+        <WidgetTitle widget={widget} index={index} />
+        <WidgetActions
+          widget={widget}
+          index={index}
+          meta={`computed profile · ${widget.observations.length} note${widget.observations.length === 1 ? '' : 's'}`}
+          onAssumptions={onAssumptions}
+          onInspect={onInspect}
+        />
       </div>
       <ul className="obs-list">
-        {widget.observations.map((observation, index) => (
-          <li className="obs-item" key={`${index}-${observation}`}>
-            <span className="obs-num">{String(index + 1).padStart(2, '0')}</span>
-            <span className="obs-text">{observation}</span>
-          </li>
+        {visible.map((observation, observationIndex) => (
+          <ObservationItem key={`${observationIndex}-${observation}`} index={observationIndex} observation={observation} />
         ))}
       </ul>
+      {extra.length > 0 && (
+        <details className="obs-more" open={expanded} onToggle={event => setExpanded(event.currentTarget.open)}>
+          <summary>Show all {widget.observations.length}</summary>
+          <ul className="obs-list">
+            {extra.map((observation, extraIndex) => (
+              <ObservationItem key={`${extraIndex + 2}-${observation}`} index={extraIndex + 2} observation={observation} />
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   );
 }
@@ -307,10 +597,11 @@ function DonutCard({
   const radius = 70;
   const innerRadius = 44;
   let accumulated = 0;
+  const card = useWidgetCard(index);
   return (
-    <div className="w w-donut" style={{ gridColumn: `span ${widget.span}` }}>
+    <div className={card.className('w w-donut')} style={{ gridColumn: `span ${widget.span}` }} {...card.props}>
       <div className="w-hd">
-        <h3>{widget.title}</h3>
+        <WidgetTitle widget={widget} index={index} />
         <WidgetActions
           widget={widget}
           index={index}
@@ -405,10 +696,11 @@ function StatListCard({
 }) {
   const data = aggregateBy(rows, widget.cat, widget.metric, widget.aggregate, schema);
   const total = data.reduce((sum, item) => sum + item.value, 0) || 1;
+  const card = useWidgetCard(index);
   return (
-    <div className="w w-statlist" style={{ gridColumn: `span ${widget.span}` }}>
+    <div className={card.className('w w-statlist')} style={{ gridColumn: `span ${widget.span}` }} {...card.props}>
       <div className="w-hd">
-        <h3>{widget.title}</h3>
+        <WidgetTitle widget={widget} index={index} />
         <WidgetActions widget={widget} index={index} meta={`${data.length} groups`} onAssumptions={onAssumptions} onInspect={onInspect} />
       </div>
       <ul className="sl">
@@ -451,10 +743,11 @@ function CountBarCard({
   const maximum = Math.max(...data.map(item => item.value), 1);
   const barWidth = (width - paddingLeft - paddingRight) / Math.max(data.length, 1);
   const yScale = (value: number) => height - paddingBottom - (value / maximum) * (height - paddingTop - paddingBottom);
+  const card = useWidgetCard(index);
   return (
-    <div className="w w-chart" style={{ gridColumn: `span ${widget.span}` }}>
+    <div className={card.className('w w-chart')} style={{ gridColumn: `span ${widget.span}` }} {...card.props}>
       <div className="w-hd">
-        <h3>{widget.title}</h3>
+        <WidgetTitle widget={widget} index={index} />
         <WidgetActions widget={widget} index={index} meta={`count · ${data.length}`} onAssumptions={onAssumptions} onInspect={onInspect} />
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="group" aria-label={`${widget.title}. Counts for ${data.length} categories.`}>
@@ -512,6 +805,7 @@ function SeriesCard({
   const data = aggregateCategories
     ? aggregateBy(rows, widget.x, widget.y, widget.aggregate, schema).slice(0, 12).map(item => ({ x: item.key, y: item.value }))
     : seriesBy(rows, widget.x, widget.y, widget.aggregate, schema);
+  const card = useWidgetCard(index);
   if (!data.length) return null;
   const width = widget.type === 'line' ? 700 : 400;
   const height = 200;
@@ -535,9 +829,9 @@ function SeriesCard({
   const labelEvery = Math.ceil(data.length / (widget.type === 'line' ? 8 : 6));
   const meta = `${widget.type} · ${data.length}${widget.type === 'line' ? ' pts' : aggregateCategories ? ' groups' : ''}`;
   return (
-    <div className="w w-chart" style={{ gridColumn: `span ${widget.span}` }}>
+    <div className={card.className('w w-chart')} style={{ gridColumn: `span ${widget.span}` }} {...card.props}>
       <div className="w-hd">
-        <h3>{widget.title}</h3>
+        <WidgetTitle widget={widget} index={index} />
         <WidgetActions widget={widget} index={index} meta={meta} onAssumptions={onAssumptions} onInspect={onInspect} />
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className={widget.span >= 12 ? 'tall' : ''} role="group" aria-label={`${widget.title}. ${data.length} ${widget.type === 'line' ? 'points' : 'bars'} from ${String(data[0].x)} to ${String(data[data.length - 1].x)}.`}>
@@ -648,18 +942,18 @@ function TableCard({
 }) {
   const shown = sortTableRows(rows, schema, widget);
   const transform = tableTransformLabel(widget);
-  const fingerprint = widgetFingerprint(widget);
+  const card = useWidgetCard(index);
   return (
-    <div className={`w w-table${fallback ? ' is-fallback' : ''}`} style={{ gridColumn: `span ${widget.span}` }}>
+    <div className={card.className(`w w-table${fallback ? ' is-fallback' : ''}`)} style={{ gridColumn: `span ${widget.span}` }} {...card.props}>
       <div className="w-hd">
-        <h3>{widget.title}</h3>
-        <WidgetActions widget={widget} index={index} inspect={false} meta={`${rows.length} rows · showing ${shown.length}`} onAssumptions={onAssumptions} onInspect={onInspect} />
+        <WidgetTitle widget={widget} index={index} />
+        <WidgetActions widget={widget} index={index} inspect={false} meta={`${rows.length} rows · showing ${shown.length}`} onAssumptions={onAssumptions} onInspect={onInspect} onExport={onExport} onCopy={onCopy} />
       </div>
-      <div className="table-toolbar">
-        {transform && <span className="transform-chip" title="Chef transform applied to this table">{transform}</span>}
-        <button type="button" className="btn btn-ghost table-export-btn" data-export-csv={fingerprint} onClick={() => onExport(widget)}>CSV ↓</button>
-        <button type="button" className="btn btn-ghost table-export-btn" data-copy-md={fingerprint} onClick={() => onCopy(widget)}>Copy MD</button>
-      </div>
+      {transform && (
+        <div className="table-toolbar">
+          <span className="transform-chip" title="Chef transform applied to this table">{transform}</span>
+        </div>
+      )}
       <div className="table-scroll">
         <table>
           <thead><tr>{schema.map(column => <th key={column.name} className={column.type === 'number' ? 'num' : ''}>{humanize(column.name)}</th>)}</tr></thead>
@@ -692,10 +986,47 @@ export default function WidgetGrid({
   onEditWidget,
   onChefWidget,
 }: WidgetGridProps) {
+  const [renamingIndex, setRenamingIndex] = useState<number | null>(null);
+  const [drag, setDrag] = useState<WidgetDragState | null>(null);
+  const dragRef = useRef<WidgetDragState | null>(null);
+  dragRef.current = drag;
   const comparisonsByWidget = new Map(comparisons.map(comparison => [comparison.fingerprint, comparison]));
   const goalsByWidget = new Map(goals.map(goal => [goal.widgetFingerprint, goal]));
+  const order = widgetDisplayOrder(recipe.widgets);
+  const dnd: WidgetDnd = {
+    drag,
+    onHandleDragStart: (index, event) => {
+      event.dataTransfer.setData('text/plain', String(index));
+      event.dataTransfer.effectAllowed = 'move';
+      setDrag({ from: index, over: null, before: true, axis: 'x' });
+    },
+    onHandleDragEnd: () => setDrag(null),
+    onCardDragOver: (index, event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      const { before, axis } = dropInsertsBefore(event, event.currentTarget);
+      setDrag(current => {
+        if (!current) return current;
+        if (current.over === index && current.before === before && current.axis === axis) return current;
+        return { ...current, over: index, before, axis };
+      });
+    },
+    onCardDrop: (index, event) => {
+      event.preventDefault();
+      const raw = event.dataTransfer.getData('text/plain');
+      const transferred = raw === '' ? Number.NaN : Number(raw);
+      const from = Number.isInteger(transferred) ? transferred : dragRef.current?.from;
+      const { before } = dropInsertsBefore(event, event.currentTarget);
+      setDrag(null);
+      if (from == null || !Number.isInteger(from)) return;
+      const destination = destinationIndex(from, index, before);
+      if (destination === from) return;
+      onEditWidget(from, 'move-to', String(destination));
+    },
+  };
   return (
-    <WidgetEditorContext.Provider value={{ count: recipe.widgets.length, onEdit: onEditWidget, onChef: onChefWidget }}>
+    <WidgetEditorContext.Provider value={{ count: recipe.widgets.length, renamingIndex, setRenamingIndex, onEdit: onEditWidget, onChef: onChefWidget }}>
+      <WidgetDndContext.Provider value={dnd}>
       <div id="dash-grid" className="dash-grid">
       {recipe.fallback && (
         <div className="w w-banner" style={{ gridColumn: 'span 12' }}>
@@ -710,12 +1041,13 @@ export default function WidgetGrid({
           <span className="banner-msg">{recipe.rejectedWidgets} invalid model widget{recipe.rejectedWidgets === 1 ? ' was' : 's were'} rejected. The remaining dashboard uses only fields supported by this dataset.</span>
         </div>
       )}
-      {recipe.widgets.map((widget, index) => {
+      {order.map(index => {
+        const widget = recipe.widgets[index];
         const fingerprint = widgetFingerprint(widget);
         const className = changedWidgets.has(fingerprint) ? 'is-changed' : '';
         let content = null;
         if (widget.type === 'kpi') content = <KpiCard widget={widget} index={index} rows={rows} schema={schema} comparison={comparisonsByWidget.get(fingerprint)} goal={goalsByWidget.get(fingerprint)} excludeOutliers={excludeOutliers} onAssumptions={onAssumptions} onInspect={onInspect} />;
-        else if (widget.type === 'observations') content = <ObservationsCard widget={widget} />;
+        else if (widget.type === 'observations') content = <ObservationsCard widget={widget} index={index} onAssumptions={onAssumptions} onInspect={onInspect} />;
         else if (widget.type === 'donut') content = <DonutCard widget={widget} index={index} rows={rows} schema={schema} onAssumptions={onAssumptions} onInspect={onInspect} />;
         else if (widget.type === 'statlist') content = <StatListCard widget={widget} index={index} rows={rows} schema={schema} onAssumptions={onAssumptions} onInspect={onInspect} />;
         else if (widget.type === 'countbar') content = <CountBarCard widget={widget} index={index} rows={rows} onAssumptions={onAssumptions} onInspect={onInspect} />;
@@ -724,6 +1056,7 @@ export default function WidgetGrid({
         return <div key={`${fingerprint}-${index}`} data-fp={fingerprint} className={className} style={{ display: 'contents' }}>{content}</div>;
       })}
       </div>
+      </WidgetDndContext.Provider>
     </WidgetEditorContext.Provider>
   );
 }

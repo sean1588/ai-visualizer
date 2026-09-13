@@ -263,11 +263,36 @@
   .widget-edit-menu button { padding: 6px 7px; border: 0; border-bottom: 1px dashed var(--rule-soft); background: transparent; color: var(--fg); font-family: var(--font-mono); font-size: 9px; text-align: left; cursor: pointer; }
   .widget-edit-menu button:hover:not(:disabled), .widget-edit-menu button:focus-visible { background: var(--bg-soft); }
   .widget-edit-menu button:disabled { opacity: .35; cursor: not-allowed; }
+  .widget-menu { position: relative; flex-shrink: 0; }
+  .widget-menu-trigger { list-style: none; user-select: none; cursor: pointer; border: 1px solid transparent; background: transparent; color: var(--fg-mute); border-radius: 4px; padding: 2px 8px; font-family: var(--font-mono); font-size: 16px; line-height: 1; letter-spacing: .12em; }
+  .widget-menu-trigger::-webkit-details-marker { display: none; }
+  .widget-menu[open] > .widget-menu-trigger, .widget-menu-trigger:hover, .widget-menu-trigger:focus-visible { border-color: var(--rule-soft); color: var(--fg); background: var(--bg-soft); outline: none; }
+  .widget-menu .menu-list { min-width: 240px; }
+  .widget-menu .menu-list button { white-space: normal; }
+  .widget-menu .widget-rationale { display: grid; }
+  .widget-menu .widget-rationale > summary { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 8px 9px; border: 0; border-bottom: 1px dashed var(--rule-soft); border-radius: 0; background: transparent; color: var(--fg); font-family: var(--font-mono); font-size: 10px; letter-spacing: .05em; text-transform: uppercase; text-align: left; cursor: pointer; }
+  .widget-menu .widget-rationale > summary:hover, .widget-menu .widget-rationale > summary:focus-visible { background: var(--bg-soft); outline: none; }
+  .widget-menu .widget-rationale p { position: static; width: auto; margin: 0; padding: 6px 9px 10px; border: 0; box-shadow: none; }
+  .widget-drag-handle { display: inline-flex; align-items: center; justify-content: center; cursor: grab; user-select: none; border: 0; background: transparent; color: var(--fg-mute); padding: 2px 4px; font-size: 12px; letter-spacing: -2px; line-height: 1; }
+  .widget-drag-handle:active { cursor: grabbing; }
+  .w.is-dragging { opacity: .45; }
+  .w.drop-before-x { box-shadow: inset 2px 0 0 var(--accent); }
+  .w.drop-after-x { box-shadow: inset -2px 0 0 var(--accent); }
+  .w.drop-before-y { box-shadow: inset 0 2px 0 var(--accent); }
+  .w.drop-after-y { box-shadow: inset 0 -2px 0 var(--accent); }
+  input.inline-rename-input { width: 100%; min-width: 8ch; margin: 0; border: 0; border-bottom: 1px solid var(--accent); border-radius: 0; background: transparent; color: inherit; font: inherit; padding: 0; outline: none; }
+  .dash-head input.inline-rename-input { font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 36px; letter-spacing: -0.02em; margin: 4px 0 6px; }
+  .w-hd input.inline-rename-input { font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 17px; }
+  .w-kpi input.inline-rename-input { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; }
+  @media (pointer: fine) {
+    .widget-menu-trigger { opacity: .4; }
+    .w:hover .widget-menu-trigger, .w:focus-within .widget-menu-trigger, .widget-menu[open] > .widget-menu-trigger { opacity: 1; }
+  }
 
   /* kpi */
   .w-kpi { padding: 22px; }
   .kpi-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
-  .kpi-top .w-actions { max-width: 75%; }
+  .kpi-top .w-actions { flex-shrink: 0; flex-wrap: nowrap; }
   .w-kpi .label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-mute); margin-bottom: 8px; }
   .w-kpi .value { font-family: var(--font-display); font-weight: 400; font-size: 36px; letter-spacing: -0.025em; line-height: 1; }
   .w-kpi .delta { font-family: var(--font-mono); font-size: 11px; color: var(--accent-2); margin-top: 8px; letter-spacing: 0.02em; }
@@ -394,7 +419,11 @@
   .obs-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
   .obs-item { display: grid; grid-template-columns: 36px 1fr; gap: 16px; align-items: start; padding-bottom: 14px; border-bottom: 1px dashed var(--rule-soft); }
   .obs-item:last-child { border-bottom: none; padding-bottom: 0; }
+  .w-obs .obs-list:not(:last-child) .obs-item:last-child { border-bottom: 1px dashed var(--rule-soft); padding-bottom: 14px; }
   .obs-num { font-family: var(--font-mono); font-size: 11px; color: var(--accent); letter-spacing: 0.08em; padding-top: 4px; }
+  .obs-more { margin-top: 12px; }
+  .obs-more > summary { width: max-content; cursor: pointer; font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-mute); }
+  .obs-more .obs-list { margin-top: 14px; }
 
   /* ─── The Chef · chat-to-edit panel ─── */
   .chef-fab { position: fixed; right: 22px; bottom: 22px; z-index: 50; display: none; align-items: center; gap: 9px; padding: 12px 18px 12px 14px; background: var(--accent); color: var(--accent-fg); border: 1.5px solid var(--rule); border-radius: 999px; box-shadow: 4px 4px 0 var(--rule); font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: transform 0.12s, box-shadow 0.12s; }
@@ -647,7 +676,7 @@
     .w-hd h3 { font-size: 15px; }
     .w-hd { flex-direction: column; }
     .w-actions { justify-content: flex-start; }
-    .widget-rationale p, .widget-edit-menu { right: auto; left: 0; }
+    .widget-rationale p, .widget-edit-menu, .widget-menu .menu-list { right: auto; left: 0; }
     .kpi-top { flex-direction: column; }
     .kpi-top .w-actions { max-width: 100%; }
     .kpi-value { font-size: 36px; }
@@ -701,8 +730,9 @@ button.recent-card { width: 100%; color: inherit; text-align: left; font: inheri
 [data-fp].is-changed > .w { animation: wPulse 1.6s ease-out 1; }
 
 @media (pointer: coarse) {
-  .btn, .widget-action, .assumption-chip, .widget-rationale > summary, .widget-edit > summary, .legend-button, .statlist-key, .recent-card, .example-open, .dialog-close, .workbench-tabs button, .active-filter-list button, .workbench-form input, .workbench-form select, .saved-view-panel input, #saved-view-list article > button, .goal-list article > button, .menu > summary, .menu-list button, .recipe-history > summary, .theme-picker select, .command-input, .command-item { min-height: 44px; }
-  #saved-view-list article > button:last-child, .goal-list article > button { min-width: 44px; }
+  .btn, .widget-action, .assumption-chip, .widget-rationale > summary, .widget-edit > summary, .widget-menu-trigger, .legend-button, .statlist-key, .recent-card, .example-open, .dialog-close, .workbench-tabs button, .active-filter-list button, .workbench-form input, .workbench-form select, .saved-view-panel input, #saved-view-list article > button, .goal-list article > button, .menu > summary, .menu-list button, .recipe-history > summary, .theme-picker select, .command-input, .command-item, .obs-more > summary { min-height: 44px; }
+  #saved-view-list article > button:last-child, .goal-list article > button, .widget-menu-trigger { min-width: 44px; }
+  .widget-drag-handle { display: none; }
 }
 
 @media (max-width: 640px) {

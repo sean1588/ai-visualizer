@@ -71,7 +71,7 @@ import { buildRecipeLink, buildStandaloneHtml, decodeRecipeFragment } from './sh
 import { appReducer, createInitialState, initialSteps, type AppState, type ChefMessage, type LoadingStep, type RecipeRevision, type WorkbenchTab } from './state';
 import { clearRecents, loadRecents, migrateLegacyStorage, relativeTime, saveRecent, type RecentDashboard } from './storage';
 import { track } from './telemetry';
-import WidgetGrid from './WidgetGrid';
+import WidgetGrid, { InlineRename, type WidgetEditAction } from './WidgetGrid';
 import { buildDashboardBundle, parseDashboardBundle } from './workspace';
 
 declare global {
@@ -1038,7 +1038,7 @@ function App() {
       clone.querySelector('#recurring-report')?.remove();
       clone.querySelector('.dash-actions')?.remove();
       clone.querySelector('.recipe-history')?.remove();
-      clone.querySelectorAll('.widget-action,.assumption-chip,.widget-edit,.table-export-btn,.retry-ai-btn,#data-health-btn').forEach(element => element.remove());
+      clone.querySelectorAll('.widget-action,.assumption-chip,.widget-edit,.widget-menu,.widget-drag-handle,.table-export-btn,.retry-ai-btn,#data-health-btn').forEach(element => element.remove());
       const html = buildStandaloneHtml({
         title: current.recipe.title,
         dashboardHtml: clone.outerHTML,
@@ -1123,28 +1123,39 @@ function App() {
     flashStatus('Assumptions updated');
   }, [commitRecipeChange, flashStatus]);
 
-  const editWidget = useCallback((index: number, action: 'move-up' | 'move-down' | 'resize' | 'duplicate' | 'remove') => {
+  const editWidget = useCallback((index: number, action: WidgetEditAction, payload?: string) => {
     const current = stateRef.current;
     if (!current.recipe) return;
     const widgets = [...current.recipe.widgets];
     const widget = widgets[index];
     if (!widget) return;
-    let label = `Edited ${widget.title || ('label' in widget ? widget.label : humanize(widget.type))}`;
-    if (action === 'move-up' || action === 'move-down') {
+    const title = widget.title || ('label' in widget ? widget.label : humanize(widget.type));
+    let label = `Edited ${title}`;
+    if (action === 'rename') {
+      const next = payload?.trim() || '';
+      if (!next || next === title) return;
+      widgets[index] = widget.type === 'kpi' ? { ...widget, title: next, label: next } : { ...widget, title: next };
+      label = `Renamed ${title} to ${next}`;
+    } else if (action === 'move-to') {
+      const destination = Number(payload);
+      if (!Number.isInteger(destination) || destination < 0 || destination >= widgets.length || destination === index) return;
+      const [moved] = widgets.splice(index, 1);
+      widgets.splice(destination, 0, moved);
+      label = `Moved ${title}`;
+    } else if (action === 'move-up' || action === 'move-down') {
       const destination = index + (action === 'move-up' ? -1 : 1);
       if (destination < 0 || destination >= widgets.length) return;
       [widgets[index], widgets[destination]] = [widgets[destination], widgets[index]];
-      label = `Moved ${widget.title || ('label' in widget ? widget.label : humanize(widget.type))}`;
+      label = `Moved ${title}`;
     } else if (action === 'resize') {
       if (widget.type === 'table' || widget.type === 'observations') return;
       const spans = [3, 4, 6, 8, 12] as const;
       const spanIndex = spans.indexOf(widget.span as typeof spans[number]);
       const span = spans[(spanIndex + 1) % spans.length];
       widgets[index] = { ...widget, span } as RenderedWidget;
-      label = `Resized ${widget.title || ('label' in widget ? widget.label : humanize(widget.type))} to ${span}/12`;
+      label = `Resized ${title} to ${span}/12`;
     } else if (action === 'duplicate') {
       const duplicate = cloneRecipe({ title: '', widgets: [widget] }).widgets[0];
-      const title = widget.title || ('label' in widget ? widget.label : humanize(widget.type));
       if ('label' in duplicate) duplicate.label = `${title} copy`;
       duplicate.title = `${title} copy`;
       widgets.splice(index + 1, 0, duplicate);
@@ -1155,12 +1166,22 @@ function App() {
         return;
       }
       widgets.splice(index, 1);
-      label = `Removed ${widget.title || ('label' in widget ? widget.label : humanize(widget.type))}`;
+      label = `Removed ${title}`;
     }
     const recipe = { ...current.recipe, widgets };
     commitRecipeChange(recipe, label, { changedWidgets: new Set(widgets.map(widgetFingerprint)) });
     track('direct_edit', { action });
     window.setTimeout(() => dispatch({ type: 'patch', value: { changedWidgets: new Set() } }), 1200);
+    flashStatus(label);
+  }, [commitRecipeChange, flashStatus]);
+
+  const renameDashboard = useCallback((title: string) => {
+    const current = stateRef.current;
+    if (!current.recipe) return;
+    const next = title.trim();
+    if (!next || next === current.recipe.title) return;
+    const label = `Renamed ${current.recipe.title} to ${next}`;
+    commitRecipeChange({ ...current.recipe, title: next }, label);
     flashStatus(label);
   }, [commitRecipeChange, flashStatus]);
 
@@ -1791,7 +1812,7 @@ function App() {
           <>
             <div className="dash-head">
               <div className="eyebrow eyebrow-accent">— Dashboard —</div>
-              <h1 id="dash-title">{state.recipe.title}</h1>
+              <InlineRename as="h1" id="dash-title" value={state.recipe.title} onCommit={renameDashboard} />
               <div id="dash-meta" className="dash-head-meta">
                 {state.rows.length} rows · {state.schema.length} cols · updated {new Date(state.updatedAt || Date.now()).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
               </div>
