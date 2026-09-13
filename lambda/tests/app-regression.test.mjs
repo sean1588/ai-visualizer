@@ -366,7 +366,7 @@ test("Escape dismisses palette, menus, workbench, chef, then presentation", asyn
 
     await page.keyboard.press("Control+k");
     await page.waitForSelector("#command-palette[open]");
-    await page.locator("#command-input").fill("brief");
+    await page.locator("#command-input").fill("executive");
     await page.keyboard.press("Enter");
     await page.waitForSelector("#analysis-workbench[open]");
     await page.waitForSelector("#executive-brief");
