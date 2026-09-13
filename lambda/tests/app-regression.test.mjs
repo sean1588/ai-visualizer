@@ -356,6 +356,57 @@ test("action hierarchy keeps the landing header quiet and the palette reaches ev
   });
 });
 
+test("Escape dismisses palette, menus, workbench, chef, then presentation", async () => {
+  await withPage(async page => {
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, AGGREGATE_PLAN);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#paste").fill(JSON.stringify(SEGMENT_REVENUE, null, 2));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    await page.keyboard.press("Control+k");
+    await page.waitForSelector("#command-palette[open]");
+    await page.locator("#command-input").fill("brief");
+    await page.keyboard.press("Enter");
+    await page.waitForSelector("#analysis-workbench[open]");
+    await page.waitForSelector("#executive-brief");
+    assert.match(await page.locator("#analysis-workbench button.active").innerText(), /Brief/i);
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("#analysis-workbench")?.hasAttribute("open"));
+
+    await page.locator("#export-menu").click();
+    await page.waitForSelector("details.menu[open]");
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("details.menu[open]").count(), 0);
+    assert.equal(await page.evaluate(() => document.activeElement?.id), "export-menu");
+
+    await page.locator("#chef-fab").click();
+    await page.waitForSelector("#chef-panel.is-open");
+    await page.locator(".w-kpi .label").first().dblclick();
+    await page.locator(".w-kpi .inline-rename-input").fill("Temp");
+    await page.locator(".w-kpi .inline-rename-input").press("Escape");
+    assert.equal(await page.locator(".w-kpi .inline-rename-input").count(), 0);
+    assert.ok(await page.locator("#chef-panel").evaluate(element => element.classList.contains("is-open")));
+
+    await page.locator(".w-chart rect.chart-hit").first().click({ force: true });
+    await page.waitForSelector("#inspector-dialog[open]");
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("#inspector-dialog")?.hasAttribute("open"));
+    assert.ok(await page.locator("#chef-panel").evaluate(element => element.classList.contains("is-open")));
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("#chef-panel")?.classList.contains("is-open"));
+
+    await page.keyboard.press("/");
+    await page.waitForSelector("#chef-panel.is-open");
+    await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); });
+    await page.keyboard.press("p");
+    await page.waitForFunction(() => document.body.classList.contains("presentation-mode"));
+    assert.equal(await page.locator("#chef-panel.is-open").count(), 0);
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.body.classList.contains("presentation-mode"));
+  });
+});
+
 test("completed-plate gallery teaches prompts and direct edits share undo history", async () => {
   await withPage(async page => {
     const requests = [];
@@ -598,6 +649,7 @@ test("coarse-pointer controls meet the 44px touch target baseline", async () => 
     await page.getByText("SAAS METRICS").click();
     await page.waitForSelector("#mobile-analyze");
     assert.ok(await page.locator(".widget-menu-trigger").first().evaluate(element => element.getBoundingClientRect().height) >= 44);
+    assert.equal(await page.locator(".widget-drag-handle").first().isVisible(), false);
     await page.locator("#mobile-more").click();
     assert.ok(await page.locator("#replace-data-btn").evaluate(element => element.getBoundingClientRect().height) >= 44);
     await page.keyboard.press("Escape");
@@ -609,7 +661,7 @@ test("coarse-pointer controls meet the 44px touch target baseline", async () => 
     await page.locator("#kpi-goal-form button[type=submit]").click();
     const goalRemove = page.locator("#kpi-goal-list article > button").first();
     assert.ok(await goalRemove.evaluate(element => element.getBoundingClientRect().width) >= 44);
-  }, { context: { hasTouch: true, viewport: devices["iPhone 14 Pro"].viewport } });
+  }, { context: { ...devices["iPhone 13"], hasTouch: true } });
 });
 
 test("Chef accepts recoverable rendered-widget replies instead of surfacing invalid recipe", async () => {
