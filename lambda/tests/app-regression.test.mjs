@@ -360,10 +360,11 @@ test("completed-plate gallery teaches prompts and direct edits share undo histor
     assert.equal(await page.locator("#recipe-undo").count(), 0, "undo is hidden until there is history");
     assert.equal(await page.locator(".recipe-history").count(), 0);
 
+    await openWidgetMenu(page, ".w-kpi");
     await page.locator(".w-kpi .widget-rationale summary").first().click();
     assert.match(await page.locator(".w-kpi .widget-rationale p").first().innerText(), /recurring revenue is the primary operating metric/i);
 
-    await page.locator(".w-kpi .widget-edit summary").first().click();
+    await openWidgetMenu(page, ".w-kpi");
     await page.getByRole("button", { name: "Move later" }).first().click();
     assert.equal(await page.locator(".w-kpi .label").first().innerText(), "NEW CUSTOMERS");
     assert.match(await page.locator(".recipe-history").innerText(), /2 revisions/i);
@@ -380,19 +381,19 @@ test("completed-plate gallery teaches prompts and direct edits share undo histor
     await page.keyboard.press("Shift+Control+z");
     assert.equal(await page.locator(".w-kpi .label").first().innerText(), "NEW CUSTOMERS");
 
-    await page.locator(".w-kpi .widget-edit summary").first().click();
+    await openWidgetMenu(page, ".w-kpi");
     await page.getByRole("button", { name: /Resize · 3\/12/ }).first().click();
     assert.equal(await page.locator(".w-kpi").first().evaluate(element => element.style.gridColumn), "span 4");
 
     const widgetCount = await page.locator("#dash-grid > [data-fp]").count();
-    await page.locator(".w-kpi .widget-edit summary").first().click();
+    await openWidgetMenu(page, ".w-kpi");
     await page.getByRole("button", { name: "Duplicate" }).first().click();
     assert.equal(await page.locator("#dash-grid > [data-fp]").count(), widgetCount + 1);
-    await page.locator(".w-kpi .widget-edit summary").first().click();
+    await openWidgetMenu(page, ".w-kpi");
     await page.getByRole("button", { name: "Remove" }).first().click();
     assert.equal(await page.locator("#dash-grid > [data-fp]").count(), widgetCount);
 
-    await page.locator(".w-kpi .widget-edit summary").first().click();
+    await openWidgetMenu(page, ".w-kpi");
     await page.getByRole("button", { name: "Ask the Chef" }).first().click();
     assert.match(await page.locator("#chef-target").innerText(), /Editing/i);
     await page.locator("#chef-input").fill("Make this widget full width");
@@ -531,7 +532,7 @@ test("coarse-pointer controls meet the 44px touch target baseline", async () => 
     assert.ok(await page.locator("#browse-btn").evaluate(element => element.getBoundingClientRect().height) >= 44);
     await page.getByText("SAAS METRICS").click();
     await page.waitForSelector("#chef-fab.is-visible");
-    assert.ok(await page.locator(".assumption-chip").first().evaluate(element => element.getBoundingClientRect().height) >= 44);
+    assert.ok(await page.locator(".widget-menu-trigger").first().evaluate(element => element.getBoundingClientRect().height) >= 44);
     assert.ok(await page.locator("#data-menu").evaluate(element => element.getBoundingClientRect().height) >= 44);
     await page.locator("#data-menu").click();
     assert.ok(await page.locator("#replace-data-btn").evaluate(element => element.getBoundingClientRect().height) >= 44);
@@ -614,6 +615,7 @@ test("widget assumptions are visible and editable without another AI call", asyn
     await page.waitForSelector("#chef-fab.is-visible");
 
     const firstKpi = page.locator(".w-kpi").first();
+    await openWidgetMenu(page, ".w-kpi");
     await firstKpi.locator("[data-edit-assumptions]").click();
     await page.locator('#assumptions-form [name="aggregate"]').selectOption("average");
     await page.locator('#assumptions-form [name="format"]').selectOption("currency");
@@ -1552,6 +1554,107 @@ test("compact numbers never print 1000B for just-under-a-trillion values", async
     assert.equal(formatted.negativeCurrency, "-$1.2k");
   });
 });
+
+test("widget menu, observations placement, rename, and drag-to-reorder", async () => {
+  await withPage(async page => {
+    await mockInference(page);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.getByText("SAAS METRICS").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    const widgetCount = await page.locator("#dash-grid > [data-fp]").count();
+    assert.equal(await page.locator("#dash-grid .widget-menu-trigger").count(), widgetCount);
+    const firstKpi = page.locator(".w-kpi").first();
+    assert.equal(await firstKpi.locator(".widget-menu-trigger").count(), 1);
+    assert.equal(await firstKpi.locator(".widget-drag-handle").count(), 1);
+    assert.equal(await firstKpi.locator("button.widget-action, .assumption-chip, .widget-edit").count(), 0);
+    assert.equal(await page.locator(".table-toolbar .table-export-btn").count(), 0);
+
+    const kinds = await page.evaluate(() => [...document.querySelectorAll("#dash-grid > [data-fp] > .w")].map(element => {
+      if (element.classList.contains("w-kpi")) return "kpi";
+      if (element.classList.contains("w-obs")) return "obs";
+      if (element.classList.contains("w-table")) return "table";
+      return "chart";
+    }));
+    assert.deepEqual(kinds.slice(0, 5), ["kpi", "kpi", "kpi", "kpi", "obs"]);
+    assert.ok(await page.locator(".obs-more summary").isVisible());
+    assert.match(await page.locator(".obs-more summary").innerText(), /Show all 3/i);
+    assert.equal(await page.locator(".obs-item:visible").count(), 2);
+    await page.locator(".obs-more summary").click();
+    assert.equal(await page.locator(".obs-item:visible").count(), 3);
+
+    await openWidgetMenu(page, ".w-kpi");
+    await page.locator("details.widget-menu[open] [data-inspect-widget]").click();
+    await page.waitForSelector("#inspector-dialog[open]");
+    await page.locator("#inspector-close").click();
+
+    await openWidgetMenu(page, ".w-kpi");
+    await page.getByRole("button", { name: /Rename/ }).click();
+    await page.locator(".w-kpi .inline-rename-input").fill("Hero MRR");
+    await page.locator(".w-kpi .inline-rename-input").press("Enter");
+    assert.match(await firstKpi.locator(".label").innerText(), /HERO MRR/);
+    await page.locator("#recipe-undo").click();
+    assert.match(await firstKpi.locator(".label").innerText(), /CURRENT MRR/);
+
+    await firstKpi.locator(".label").dblclick();
+    await page.locator(".w-kpi .inline-rename-input").fill("Primary MRR");
+    await page.locator(".w-kpi .inline-rename-input").press("Enter");
+    assert.match(await firstKpi.locator(".label").innerText(), /PRIMARY MRR/);
+    await page.locator("#recipe-undo").click();
+
+    await page.locator("#dash-title").dblclick();
+    await page.locator("#dash-title").fill("Growth Review");
+    await page.locator("#dash-title").press("Enter");
+    assert.match(await page.locator("#dash-title").innerText(), /Growth Review/);
+    await page.locator("#recipe-undo").click();
+    assert.match(await page.locator("#dash-title").innerText(), /SaaS Growth Review/i);
+
+    await dragWidget(page, 0, 1, true);
+    assert.equal(await firstKpi.locator(".label").innerText(), "NEW CUSTOMERS");
+    await page.locator("#recipe-undo").click();
+    assert.equal(await firstKpi.locator(".label").innerText(), "CURRENT MRR");
+
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    const csvDownload = page.waitForEvent("download");
+    await openWidgetMenu(page, ".w-table");
+    await page.locator("[data-export-csv]").click();
+    assert.match((await csvDownload).suggestedFilename(), /\.csv$/);
+    await openWidgetMenu(page, ".w-table");
+    await page.locator("[data-copy-md]").click();
+    await page.waitForFunction(() => document.getElementById("status-pill")?.textContent?.includes("Copied markdown"));
+  });
+});
+
+async function widgetCard(page, fingerprintOrIndex) {
+  if (typeof fingerprintOrIndex === "number") return page.locator("#dash-grid > [data-fp]").nth(fingerprintOrIndex);
+  if (typeof fingerprintOrIndex === "string" && /^[.#[]/.test(fingerprintOrIndex)) return page.locator(fingerprintOrIndex).first();
+  return page.locator(`[data-fp="${fingerprintOrIndex}"]`);
+}
+
+async function openWidgetMenu(page, fingerprintOrIndex) {
+  const card = await widgetCard(page, fingerprintOrIndex);
+  const opened = await card.locator("details.widget-menu").evaluate(element => element.open);
+  if (!opened) await card.locator(".widget-menu-trigger").click();
+  await page.waitForSelector("details.widget-menu[open]");
+  return card;
+}
+
+async function dragWidget(page, fromDisplayIndex, toIndex, after = true) {
+  await page.evaluate(([from, to, insertAfter]) => {
+    const cards = [...document.querySelectorAll("#dash-grid > [data-fp] > .w")];
+    const source = cards[from]?.querySelector(".widget-drag-handle");
+    const target = cards[to];
+    if (!source || !target) throw new Error("missing drag source or target");
+    const dataTransfer = new DataTransfer();
+    source.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer }));
+    const rect = target.getBoundingClientRect();
+    const clientX = insertAfter ? rect.right - 4 : rect.left + 4;
+    const clientY = rect.top + rect.height / 2;
+    target.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer, clientX, clientY }));
+    target.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer, clientX, clientY }));
+    source.dispatchEvent(new DragEvent("dragend", { bubbles: true, cancelable: true, dataTransfer }));
+  }, [fromDisplayIndex, toIndex, after]);
+}
 
 async function clickMenuItem(page, menuId, itemSelector) {
   await page.locator(menuId).click();
