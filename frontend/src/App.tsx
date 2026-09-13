@@ -1382,12 +1382,30 @@ function App() {
     track('chart_inspected', { widgetType: widget.type });
   }, []);
 
-  const focusOnInspectorValue = useCallback((column: string, value: unknown) => {
+  const applyEqualsFocus = useCallback((column: string, value: unknown, widgetType?: string) => {
     const current = stateRef.current;
-    track('focus_from_chart', { widgetType: current.inspector?.widget.type });
+    track('focus_from_chart', { widgetType: widgetType ?? current.inspector?.widget.type });
     const filters = setEqualsFilter(current.filters, column, value, `filter_${Date.now().toString(36)}`);
-    if (filters !== current.filters) updateWorkbench({ filters });
-  }, [updateWorkbench]);
+    if (filters === current.filters) return;
+    updateWorkbench({ filters });
+    flashStatus(`Focused on ${String(value)}`);
+  }, [flashStatus, updateWorkbench]);
+
+  const focusOnInspectorValue = useCallback((column: string, value: unknown) => {
+    applyEqualsFocus(column, value);
+  }, [applyEqualsFocus]);
+
+  const focusOnWidgetValue = useCallback((widget: RenderedWidget, value: unknown) => {
+    const column = inspectedColumn(widget);
+    if (!column) return;
+    const current = stateRef.current;
+    const existing = current.filters.find(filter => filter.column === column && filter.operator === 'equals');
+    if (existing && String(existing.value).toLocaleLowerCase() === String(value ?? '').toLocaleLowerCase()) {
+      updateWorkbench({ filters: current.filters.filter(filter => !(filter.column === column && filter.operator === 'equals')) });
+      return;
+    }
+    applyEqualsFocus(column, value, widget.type);
+  }, [applyEqualsFocus, updateWorkbench]);
 
   const submitChef = useCallback(async (request: string) => {
     const text = request.trim();
@@ -1886,6 +1904,8 @@ function App() {
             {focusedRows.length ? <WidgetGrid
               recipe={state.recipe}
               rows={focusedRows}
+              allRows={state.rows}
+              filters={state.filters}
               schema={state.schema}
               changedWidgets={state.changedWidgets}
               comparisons={state.filters.length ? [] : comparison?.kpis || []}
@@ -1893,6 +1913,7 @@ function App() {
               excludeOutliers={state.excludeOutliers}
               onAssumptions={index => dispatch({ type: 'patch', value: { assumptionsWidgetIndex: index } })}
               onInspect={openInspector}
+              onFocusValue={focusOnWidgetValue}
               onRetry={() => void retryAi()}
               onExportTable={exportTable}
               onCopyTable={widget => void copyTable(widget)}
