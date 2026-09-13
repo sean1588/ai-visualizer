@@ -57,15 +57,17 @@ import {
   type TableWidget,
   type ThresholdAlert,
 } from './domain';
+import { buildDashboardActions, MOD_KEY, type DashboardAction } from './actions';
 import AnalysisWorkbench from './AnalysisWorkbench';
 import DataHealthDialog from './DataHealth';
 import ExampleGallery from './ExampleGallery';
 import { EXAMPLE_PLATES, type ExamplePlate } from './examples';
 import { AlertsDialog } from './InsightsDialogs';
+import Menu from './Menu';
 import { buildChefPrompt, buildPrompt } from './prompts';
 import { complete, fetchRemoteData } from './services';
 import { buildRecipeLink, buildStandaloneHtml, decodeRecipeFragment } from './sharing';
-import { appReducer, createInitialState, initialSteps, type AppState, type ChefMessage, type LoadingStep, type RecipeRevision } from './state';
+import { appReducer, createInitialState, initialSteps, type AppState, type ChefMessage, type LoadingStep, type RecipeRevision, type WorkbenchTab } from './state';
 import { clearRecents, loadRecents, migrateLegacyStorage, relativeTime, saveRecent, type RecentDashboard } from './storage';
 import { track } from './telemetry';
 import WidgetGrid from './WidgetGrid';
@@ -1038,7 +1040,7 @@ function App() {
       const clone = dashboard.cloneNode(true) as HTMLElement;
       clone.classList.add('is-active');
       clone.querySelector('#recurring-report')?.remove();
-      clone.querySelector('.dash-share-actions')?.remove();
+      clone.querySelector('.dash-actions')?.remove();
       clone.querySelector('.recipe-history')?.remove();
       clone.querySelectorAll('.widget-action,.assumption-chip,.widget-edit,.table-export-btn,.retry-ai-btn,#data-health-btn').forEach(element => element.remove());
       const html = buildStandaloneHtml({
@@ -1198,6 +1200,24 @@ function App() {
   const openChefForWidget = useCallback((index: number) => {
     dispatch({ type: 'patch', value: { chefOpen: true, chefWidgetIndex: index } });
     window.setTimeout(() => document.getElementById('chef-input')?.focus(), 0);
+  }, []);
+
+  const openChef = useCallback(() => {
+    dispatch({ type: 'patch', value: { chefOpen: true, chefWidgetIndex: null } });
+    window.setTimeout(() => document.getElementById('chef-input')?.focus(), 0);
+  }, []);
+
+  const openWorkbench = useCallback((tab: WorkbenchTab) => {
+    dispatch({ type: 'patch', value: { workbenchOpen: true, workbenchTab: tab } });
+  }, []);
+
+  const togglePresentation = useCallback(() => {
+    const current = stateRef.current;
+    if (!current.recipe) return;
+    if (!current.presentationMode) {
+      presentationReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
+    dispatch({ type: 'patch', value: { presentationMode: !current.presentationMode } });
   }, []);
 
   const updateAlerts = useCallback((alerts: ThresholdAlert[]) => {
@@ -1588,6 +1608,37 @@ function App() {
   const chefTarget = state.chefWidgetIndex === null ? null : state.recipe?.widgets[state.chefWidgetIndex] || null;
   const chefTargetLabel = chefTarget?.title || (chefTarget && 'label' in chefTarget ? chefTarget.label : null);
   const steps: Array<[LoadingStep, string]> = [['parse', 'Parse data'], ['infer', 'Infer schema'], ['layout', 'Propose layout'], ['render', 'Render dashboard']];
+  const isHttp = hasHttpSource(state.dataSource);
+  const dashboardActions = useMemo(() => buildDashboardActions({
+    hasRecipe: !!state.recipe,
+    hasHttpSource: isHttp,
+    refreshing: state.refreshing,
+    historyIndex: state.recipeHistoryIndex,
+    historyLength: state.recipeHistory.length,
+    healthIssueCount: health ? healthIssueCount : null,
+    alertCount: state.alerts.length,
+    triggeredAlerts,
+    replaceData: () => replacementInputRef.current?.click(),
+    refresh: () => void refreshDashboard(),
+    openDataHealth: () => dispatch({ type: 'patch', value: { healthOpen: true } }),
+    openAlerts: () => dispatch({ type: 'patch', value: { alertsOpen: true } }),
+    exportPng: () => void exportPng(),
+    exportHtml: exportStandalone,
+    exportRecipe,
+    copyRecipeLink: () => void copyRecipeLink(),
+    exportBackup: exportDashboardBundle,
+    present: togglePresentation,
+    openWorkbench,
+    openChef,
+    undo: () => navigateRecipeHistory(-1),
+    redo: () => navigateRecipeHistory(1),
+  }), [copyRecipeLink, exportDashboardBundle, exportPng, exportRecipe, exportStandalone, health, healthIssueCount, isHttp, navigateRecipeHistory, openChef, openWorkbench, refreshDashboard, state.alerts.length, state.recipe, state.recipeHistory.length, state.recipeHistoryIndex, state.refreshing, togglePresentation, triggeredAlerts]);
+  const actionById = (id: string): DashboardAction | undefined => dashboardActions.find(action => action.id === id);
+  const undoAction = actionById('undo');
+  const redoAction = actionById('redo');
+  const presentAction = actionById('present');
+  const analyzeAction = actionById('analyze');
+  const showDashboardChrome = state.stage === 'dash' && !!state.recipe;
   return (
     <>
       <header className="top">
@@ -1596,15 +1647,19 @@ function App() {
           <span className="crumb-sep">/</span>
           <span id="crumb" className="crumb-active">{state.stage === 'loading' ? 'Reading…' : state.stage === 'dash' ? currentTitle : 'New dashboard'}</span>
         </div>
-        <div className="top-right">
-          <span id="status-pill" className="pill" role="status" aria-live="polite"><span className={`pill-dot ${state.recipe && !state.statusError ? 'active' : ''}`} />{statusLabel(state)}</span>
-          <button id="replace-data-btn" className="btn btn-ghost" disabled={!state.recipe} title="Apply new CSV or JSON rows to this dashboard recipe" onClick={() => replacementInputRef.current?.click()}>Replace data</button>
-          <input id="replacement-input" ref={replacementInputRef} type="file" accept=".csv,.json,.txt,application/json,text/csv,text/plain" hidden onChange={event => { const file = event.target.files?.[0]; if (file) replaceDashboardData(file); }} />
-          <button id="refresh-btn" className="btn btn-ghost" disabled={!state.recipe || !hasHttpSource(state.dataSource) || state.refreshing} title="Fetch fresh rows from the saved HTTP source" onClick={() => void refreshDashboard()}>{state.refreshing ? 'Refreshing…' : 'Refresh data'}</button>
-          <button id="export-recipe-btn" className="btn btn-ghost" disabled={!state.recipe} title="Download the layout recipe as JSON" onClick={exportRecipe}>Recipe ↓</button>
-          <button id="export-btn" className="btn btn-ghost" disabled={!state.recipe} onClick={() => void exportPng()}>Export PNG ↓</button>
-        </div>
+        {showDashboardChrome && (
+          <div className="top-right">
+            <span id="status-pill" className="pill" role="status" aria-live="polite"><span className={`pill-dot ${state.recipe && !state.statusError ? 'active' : ''}`} />{statusLabel(state)}</span>
+            {undoAction?.visible && <button id="recipe-undo" className="btn btn-ghost btn-icon" type="button" aria-label="Undo" title={`Undo · ${undoAction.shortcut}`} disabled={!undoAction.enabled} onClick={undoAction.run}>↶</button>}
+            {redoAction?.visible && <button id="recipe-redo" className="btn btn-ghost btn-icon" type="button" aria-label="Redo" title={`Redo · ${redoAction.shortcut}`} disabled={!redoAction.enabled} onClick={redoAction.run}>↷</button>}
+            <Menu id="data-menu" label="Data" actions={dashboardActions.filter(action => action.group === 'data')} />
+            <Menu id="export-menu" label="Export" actions={dashboardActions.filter(action => action.group === 'export')} />
+            {presentAction?.visible && <button id="presentation-mode" className="btn btn-ghost" type="button" title={presentAction.hint} onClick={presentAction.run}>Present</button>}
+            <kbd className="shortcut-hint" title="Command palette">{MOD_KEY}K</kbd>
+          </div>
+        )}
       </header>
+      <input id="replacement-input" ref={replacementInputRef} type="file" accept=".csv,.json,.txt,application/json,text/csv,text/plain" hidden onChange={event => { const file = event.target.files?.[0]; if (file) replaceDashboardData(file); }} />
       {state.presentationMode && <button id="exit-presentation" className="btn btn-primary presentation-exit" type="button" onClick={() => dispatch({ type: 'patch', value: { presentationMode: false } })}>Exit presentation</button>}
 
       <section id="stage-empty" className={`stage ${state.stage === 'empty' ? 'is-active' : ''}`}>
@@ -1688,23 +1743,14 @@ function App() {
                   </button>
                 </div>
               )}
-              <div className="dash-share-actions">
-                <button id="open-workbench" type="button" className="btn btn-primary" onClick={() => dispatch({ type: 'patch', value: { workbenchOpen: true, workbenchTab: 'focus' } })}>Analyze</button>
-                <button id="open-alerts" type="button" className={`btn btn-ghost ${triggeredAlerts ? 'has-alert' : ''}`} disabled={!hasHttpSource(state.dataSource)} title={hasHttpSource(state.dataSource) ? 'Configure thresholds evaluated after while-open refreshes' : 'Threshold alerts require a refreshable HTTP source'} onClick={() => dispatch({ type: 'patch', value: { alertsOpen: true } })}>Alerts · {triggeredAlerts || state.alerts.length}</button>
-                <button id="share-recipe-link" type="button" className="btn btn-ghost" onClick={() => void copyRecipeLink()}>Copy recipe link</button>
-                <button id="export-html-btn" type="button" className="btn btn-ghost" title="The exported file supports ?embed or #embed mode" onClick={exportStandalone}>Interactive HTML ↓</button>
-                <button id="presentation-mode" type="button" className="btn btn-ghost" onClick={event => {
-                  presentationReturnFocus.current = event.currentTarget;
-                  dispatch({ type: 'patch', value: { presentationMode: true } });
-                }}>Present</button>
-              </div>
-              <div className="recipe-history">
-                <button id="recipe-undo" type="button" className="btn btn-ghost" disabled={state.recipeHistoryIndex <= 0} onClick={() => navigateRecipeHistory(-1)}>↶ Undo</button>
-                <button id="recipe-redo" type="button" className="btn btn-ghost" disabled={state.recipeHistoryIndex >= state.recipeHistory.length - 1} onClick={() => navigateRecipeHistory(1)}>↷ Redo</button>
-                <details>
-                  <summary>{state.recipeHistory.length} revision{state.recipeHistory.length === 1 ? '' : 's'}</summary>
-                  <ol>{state.recipeHistory.map((revision, index) => <li className={index === state.recipeHistoryIndex ? 'current' : ''} key={`${revision.at}-${index}`}>{revision.label}</li>)}</ol>
-                </details>
+              <div className="dash-actions">
+                {analyzeAction && <button id="open-workbench" type="button" className="btn btn-primary" title={analyzeAction.hint} onClick={analyzeAction.run}>Analyze</button>}
+                {state.recipeHistory.length > 1 && (
+                  <details className="recipe-history">
+                    <summary>{state.recipeHistory.length} revisions</summary>
+                    <ol>{state.recipeHistory.map((revision, index) => <li className={index === state.recipeHistoryIndex ? 'current' : ''} key={`${revision.at}-${index}`}>{revision.label}</li>)}</ol>
+                  </details>
+                )}
               </div>
             </div>
             <RecurringReportSummary state={state} comparison={state.filters.length ? null : comparison} now={clock} onCadence={setRefreshCadence} />
