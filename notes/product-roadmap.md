@@ -145,8 +145,12 @@ emits content-hashed assets, and the PNG renderer is bundled as a lazy chunk.
 - Widgets reorder by dragging a handle on fine pointers; keyboard users keep
   Move earlier/later. Touch hides the handle and keeps the `⋯` trigger at 44px.
 - Clicking a chart value opens the row inspector with Focus dashboard on
-  `{column} = {value}`; that path writes one equals filter per column so another
-  bar click moves focus instead of stacking contradictory rules.
+  `{column} = {value}`; that path writes one equals filter per column so the
+  first focus stays discoverable.
+- Once a chart is the focus source, it stays unfiltered on its own dimension:
+  the selected group keeps full colour, the rest dim, and a click moves focus
+  or clears the filter without reopening the inspector. Other widgets keep the
+  focused rows.
 - Active filters render as dismissible chips in the dashboard head (`Focused · n
   of N rows`); chip text stays visible in presentation mode while × and Clear all
   hide with the rest of the chrome.
