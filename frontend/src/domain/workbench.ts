@@ -4,10 +4,11 @@ import type {
   DashboardRecipe,
   KpiAggregate,
   KpiWidget,
+  RenderedWidget,
   Row,
   SchemaColumn,
 } from './types.ts';
-import { widgetFingerprint } from './widgets.ts';
+import { inspectedColumn, widgetFingerprint } from './widgets.ts';
 
 export type FilterOperator = 'equals' | 'contains' | 'at-least' | 'at-most' | 'after' | 'before';
 
@@ -153,6 +154,19 @@ export function applyDashboardFilters(
 ): Row[] {
   if (!Array.isArray(filters) || !filters.length) return [...rows];
   return rows.filter(row => filters.every(filter => matchesFilter(row, filter, schema)));
+}
+
+export function rowsForWidget(
+  widget: RenderedWidget,
+  rows: readonly Row[],
+  filters: readonly DashboardFilter[],
+  schema: readonly SchemaColumn[],
+): Row[] {
+  const ownColumn = inspectedColumn(widget);
+  const applied = !ownColumn
+    ? filters
+    : filters.filter(filter => filter.operator !== 'equals' || filter.column !== ownColumn);
+  return applyDashboardFilters(rows, applied, schema);
 }
 
 export function evaluateKpiGoals(

@@ -30,6 +30,7 @@ import {
   normalizePublicDataUrl,
   operatorLabel,
   parseAndValidateRecipe,
+  rowsForWidget,
   parseCsvRecords,
   parseJsonRecords,
   refreshCadence,
@@ -744,6 +745,64 @@ test('operator labels and equals-focus filters replace one value per column', ()
       { id: 'equals', column: 'segment', operator: 'equals', value: 'midmarket' },
     ],
   );
+});
+
+test('rowsForWidget skips only equals filters on the widget dimension', () => {
+  const rows: Row[] = [
+    { segment: 'startup', channel: 'organic', revenue: 12 },
+    { segment: 'startup', channel: 'paid', revenue: 8 },
+    { segment: 'enterprise', channel: 'partner', revenue: 60 },
+    { segment: 'midmarket', channel: 'organic', revenue: 24 },
+  ];
+  const schema = inferSchema(rows);
+  const segmentEquals: DashboardFilter = { id: 'seg', column: 'segment', operator: 'equals', value: 'startup' };
+  const channelEquals: DashboardFilter = { id: 'ch', column: 'channel', operator: 'equals', value: 'organic' };
+  const channelContains: DashboardFilter = { id: 'org', column: 'channel', operator: 'contains', value: 'org' };
+  const revenueAtLeast: DashboardFilter = { id: 'rev', column: 'revenue', operator: 'at-least', value: '20' };
+  const segmentContains: DashboardFilter = { id: 'seg-c', column: 'segment', operator: 'contains', value: 'start' };
+  const bar: DashboardRecipe['widgets'][number] = {
+    type: 'bar',
+    span: 6,
+    title: 'Revenue by segment',
+    x: 'segment',
+    y: 'revenue',
+  };
+  const countbar: DashboardRecipe['widgets'][number] = {
+    type: 'countbar',
+    span: 6,
+    title: 'Rows by channel',
+    cat: 'channel',
+  };
+  const kpi: DashboardRecipe['widgets'][number] = {
+    type: 'kpi',
+    span: 3,
+    label: 'Revenue',
+    metric: 'revenue',
+    value: '104',
+    delta: null,
+  };
+  const table: DashboardRecipe['widgets'][number] = {
+    type: 'table',
+    span: 12,
+    title: 'Rows',
+    limit: 10,
+  };
+
+  assert.deepEqual(rowsForWidget(bar, rows, [segmentEquals], schema), rows);
+  assert.deepEqual(rowsForWidget(kpi, rows, [segmentEquals], schema), rows.slice(0, 2));
+  assert.deepEqual(rowsForWidget(table, rows, [segmentEquals], schema), rows.slice(0, 2));
+  assert.deepEqual(rowsForWidget(countbar, rows, [segmentEquals], schema), rows.slice(0, 2));
+
+  assert.deepEqual(
+    rowsForWidget(bar, rows, [segmentEquals, channelContains], schema),
+    [rows[0], rows[3]],
+  );
+  assert.deepEqual(rowsForWidget(kpi, rows, [segmentEquals, channelContains], schema), [rows[0]]);
+
+  assert.deepEqual(rowsForWidget(bar, rows, [segmentContains], schema), rows.slice(0, 2));
+  assert.deepEqual(rowsForWidget(bar, rows, [segmentEquals, revenueAtLeast], schema), [rows[2], rows[3]]);
+  assert.deepEqual(rowsForWidget(bar, rows, [channelEquals], schema), [rows[0], rows[3]]);
+  assert.deepEqual(rowsForWidget(countbar, rows, [channelEquals], schema), rows);
 });
 
 test('follow-up questions include widget-grounded chef prompts', () => {

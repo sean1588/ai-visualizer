@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type SyntheticEvent } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type SyntheticEvent } from 'react';
 
 import {
   aggregateBy,
@@ -9,11 +9,14 @@ import {
   formatFull,
   hashString,
   humanize,
+  inspectedColumn,
   metricValues,
+  rowsForWidget,
   seriesBy,
   sortTableRows,
   widgetDisplayOrder,
   widgetFingerprint,
+  type DashboardFilter,
   type DashboardRecipe,
   type GroupedWidget,
   type KpiComparison,
@@ -30,6 +33,8 @@ import {
 interface WidgetGridProps {
   recipe: DashboardRecipe;
   rows: Row[];
+  allRows: Row[];
+  filters: DashboardFilter[];
   schema: SchemaColumn[];
   changedWidgets: Set<string>;
   comparisons: KpiComparison[];
@@ -37,6 +42,7 @@ interface WidgetGridProps {
   excludeOutliers: boolean;
   onAssumptions: (index: number) => void;
   onInspect: (widget: RenderedWidget, selectedValue: unknown | null) => void;
+  onFocusValue: (widget: RenderedWidget, value: unknown) => void;
   onRetry: () => void;
   onExportTable: (widget: TableWidget) => void;
   onCopyTable: (widget: TableWidget) => void;
@@ -99,6 +105,43 @@ function widgetCardClass(base: string, index: number, drag: WidgetDragState | nu
     drag?.over === index ? `drop-${drag.before ? 'before' : 'after'}-${drag.axis}` : '',
   ].filter(Boolean);
   return [base, ...extras].join(' ');
+}
+
+function selectedEqualsValue(widget: RenderedWidget, filters: readonly DashboardFilter[]): string | null {
+  const column = inspectedColumn(widget);
+  if (!column) return null;
+  return filters.find(filter => filter.column === column && filter.operator === 'equals')?.value ?? null;
+}
+
+function groupIsSelected(value: unknown, selectedValue: string | null): boolean {
+  return selectedValue != null && String(value).toLocaleLowerCase() === selectedValue.toLocaleLowerCase();
+}
+
+function chartGroupClass(base: string, value: unknown, selectedValue: string | null): string {
+  if (selectedValue == null) return base;
+  return `${base} ${groupIsSelected(value, selectedValue) ? 'is-selected' : 'is-dimmed'}`;
+}
+
+function chartGroupAttrs(widget: RenderedWidget, value: unknown, selectedValue: string | null) {
+  const selected = groupIsSelected(value, selectedValue);
+  return {
+    'data-inspect-widget': widgetFingerprint(widget),
+    'data-inspect-value': encodeURIComponent(String(value)),
+    ...(selected ? { 'data-selected': 'true' } : {}),
+    ...(selectedValue != null ? { 'aria-pressed': selected } : {}),
+  };
+}
+
+function bindChartValue(
+  widget: RenderedWidget,
+  selectedValue: string | null,
+  onFocusValue: (widget: RenderedWidget, value: unknown) => void,
+  onInspect: (widget: RenderedWidget, selectedValue: unknown | null) => void,
+) {
+  return (value: unknown) => {
+    if (selectedValue != null) onFocusValue(widget, value);
+    else onInspect(widget, value);
+  };
 }
 
 function useWidgetCard(index: number) {
@@ -431,16 +474,26 @@ function ChartDataTable({
 function ChartKeyboardPoints({
   title,
   points,
+  selectedValue = null,
+  inspectWidget,
   onInspect,
 }: {
   title: string;
   points: Array<{ label: string; value: unknown }>;
+  selectedValue?: string | null;
+  inspectWidget: RenderedWidget;
   onInspect: (value: unknown) => void;
 }) {
   return (
     <div className="chart-keyboard-points" aria-label={`${title} interactive points`}>
       {points.map((point, index) => (
-        <button className="chart-keyboard-point" type="button" key={`${point.label}-${index}`} onClick={() => onInspect(point.value)}>
+        <button
+          className={chartGroupClass('chart-keyboard-point', point.value, selectedValue)}
+          type="button"
+          key={`${point.label}-${index}`}
+          {...chartGroupAttrs(inspectWidget, point.value, selectedValue)}
+          onClick={() => onInspect(point.value)}
+        >
           Inspect {point.label}
         </button>
       ))}
@@ -578,15 +631,19 @@ function DonutCard({
   index,
   rows,
   schema,
+  selectedValue,
   onAssumptions,
   onInspect,
+  onFocusValue,
 }: {
   widget: GroupedWidget;
   index: number;
   rows: Row[];
   schema: SchemaColumn[];
+  selectedValue: string | null;
   onAssumptions: (index: number) => void;
   onInspect: (widget: RenderedWidget, selectedValue: unknown | null) => void;
+  onFocusValue: (widget: RenderedWidget, value: unknown) => void;
 }) {
   const mode = widget.aggregate || chooseGroupMode(rows, widget.cat, widget.metric, schema);
   const data = aggregateBy(rows, widget.cat, widget.metric, mode, schema).slice(0, 8);
@@ -598,6 +655,7 @@ function DonutCard({
   const innerRadius = 44;
   let accumulated = 0;
   const card = useWidgetCard(index);
+  const onSelect = bindChartValue(widget, selectedValue, onFocusValue, onInspect);
   return (
     <div className={card.className('w w-donut')} style={{ gridColumn: `span ${widget.span}` }} {...card.props}>
       <div className="w-hd">
@@ -630,13 +688,12 @@ function DonutCard({
             return (
               <path
                 key={item.key}
-                className="chart-hit"
-                data-inspect-widget={widgetFingerprint(widget)}
-                data-inspect-value={encodeURIComponent(item.key)}
+                className={chartGroupClass('chart-hit', item.key, selectedValue)}
+                {...chartGroupAttrs(widget, item.key, selectedValue)}
                 d={path}
                 fill={colors[dataIndex % colors.length]}
                 opacity="0.9"
-                onClick={() => onInspect(widget, item.key)}
+                onClick={() => onSelect(item.key)}
               >
                 <title>{item.key}: {String(formatFull(item.value, widget.metric, widget.format, { rows, schema }))}</title>
               </path>
@@ -652,10 +709,9 @@ function DonutCard({
             <li key={item.key}>
               <button
                 type="button"
-                className="legend-button"
-                data-inspect-widget={widgetFingerprint(widget)}
-                data-inspect-value={encodeURIComponent(item.key)}
-                onClick={() => onInspect(widget, item.key)}
+                className={chartGroupClass('legend-button', item.key, selectedValue)}
+                {...chartGroupAttrs(widget, item.key, selectedValue)}
+                onClick={() => onSelect(item.key)}
               >
                 <span className="dot" style={{ background: colors[dataIndex % colors.length] }} />
                 <span className="k">{item.key}</span>
@@ -684,19 +740,24 @@ function StatListCard({
   index,
   rows,
   schema,
+  selectedValue,
   onAssumptions,
   onInspect,
+  onFocusValue,
 }: {
   widget: GroupedWidget;
   index: number;
   rows: Row[];
   schema: SchemaColumn[];
+  selectedValue: string | null;
   onAssumptions: (index: number) => void;
   onInspect: (widget: RenderedWidget, selectedValue: unknown | null) => void;
+  onFocusValue: (widget: RenderedWidget, value: unknown) => void;
 }) {
   const data = aggregateBy(rows, widget.cat, widget.metric, widget.aggregate, schema);
   const total = data.reduce((sum, item) => sum + item.value, 0) || 1;
   const card = useWidgetCard(index);
+  const onSelect = bindChartValue(widget, selectedValue, onFocusValue, onInspect);
   return (
     <div className={card.className('w w-statlist')} style={{ gridColumn: `span ${widget.span}` }} {...card.props}>
       <div className="w-hd">
@@ -707,7 +768,7 @@ function StatListCard({
         {data.map(item => (
           <li key={item.key}>
             <div className="sl-row">
-              <button type="button" className="statlist-key" data-inspect-widget={widgetFingerprint(widget)} data-inspect-value={encodeURIComponent(item.key)} onClick={() => onInspect(widget, item.key)}>
+              <button type="button" className={chartGroupClass('statlist-key', item.key, selectedValue)} {...chartGroupAttrs(widget, item.key, selectedValue)} onClick={() => onSelect(item.key)}>
                 {item.key}
               </button>
               <span className="sl-val">{formatCompact(item.value, widget.metric, widget.format, { rows, schema })}</span>
@@ -724,14 +785,18 @@ function CountBarCard({
   widget,
   index,
   rows,
+  selectedValue,
   onAssumptions,
   onInspect,
+  onFocusValue,
 }: {
   widget: Extract<RenderedWidget, { type: 'countbar' }>;
   index: number;
   rows: Row[];
+  selectedValue: string | null;
   onAssumptions: (index: number) => void;
   onInspect: (widget: RenderedWidget, selectedValue: unknown | null) => void;
+  onFocusValue: (widget: RenderedWidget, value: unknown) => void;
 }) {
   const data = countBy(rows, widget.cat).slice(0, 12);
   const width = 400;
@@ -744,6 +809,7 @@ function CountBarCard({
   const barWidth = (width - paddingLeft - paddingRight) / Math.max(data.length, 1);
   const yScale = (value: number) => height - paddingBottom - (value / maximum) * (height - paddingTop - paddingBottom);
   const card = useWidgetCard(index);
+  const onSelect = bindChartValue(widget, selectedValue, onFocusValue, onInspect);
   return (
     <div className={card.className('w w-chart')} style={{ gridColumn: `span ${widget.span}` }} {...card.props}>
       <div className="w-hd">
@@ -762,16 +828,15 @@ function CountBarCard({
           return (
             <rect
               key={item.key}
-              className="chart-hit"
-              data-inspect-widget={widgetFingerprint(widget)}
-              data-inspect-value={encodeURIComponent(item.key)}
+              className={chartGroupClass('chart-hit', item.key, selectedValue)}
+              {...chartGroupAttrs(widget, item.key, selectedValue)}
               x={x}
               y={y}
               width={barWidth * 0.7}
               height={height - paddingBottom - y}
               fill="var(--accent-2)"
               opacity="0.85"
-              onClick={() => onInspect(widget, item.key)}
+              onClick={() => onSelect(item.key)}
             >
               <title>{item.key}: {item.value.toLocaleString()} rows</title>
             </rect>
@@ -779,7 +844,7 @@ function CountBarCard({
         })}
         {data.map((item, dataIndex) => <text key={item.key} className="axis-tick" x={paddingLeft + dataIndex * barWidth + barWidth / 2} y={height - 12} textAnchor="middle">{item.key.slice(0, 10)}</text>)}
       </svg>
-      <ChartKeyboardPoints title={widget.title} points={data.map(item => ({ label: `${item.key}: ${item.value} rows`, value: item.key }))} onInspect={value => onInspect(widget, value)} />
+      <ChartKeyboardPoints title={widget.title} points={data.map(item => ({ label: `${item.key}: ${item.value} rows`, value: item.key }))} selectedValue={selectedValue} inspectWidget={widget} onInspect={onSelect} />
       <ChartDataTable title={widget.title} columns={[humanize(widget.cat), 'Rows']} rows={data.map(item => [item.key, item.value])} />
     </div>
   );
@@ -790,15 +855,19 @@ function SeriesCard({
   index,
   rows,
   schema,
+  selectedValue,
   onAssumptions,
   onInspect,
+  onFocusValue,
 }: {
   widget: SeriesWidget;
   index: number;
   rows: Row[];
   schema: SchemaColumn[];
+  selectedValue: string | null;
   onAssumptions: (index: number) => void;
   onInspect: (widget: RenderedWidget, selectedValue: unknown | null) => void;
+  onFocusValue: (widget: RenderedWidget, value: unknown) => void;
 }) {
   const xType = schema.find(column => column.name === widget.x)?.type;
   const aggregateCategories = widget.type === 'bar' && (xType === 'category' || xType === 'string');
@@ -806,6 +875,7 @@ function SeriesCard({
     ? aggregateBy(rows, widget.x, widget.y, widget.aggregate, schema).slice(0, 12).map(item => ({ x: item.key, y: item.value }))
     : seriesBy(rows, widget.x, widget.y, widget.aggregate, schema);
   const card = useWidgetCard(index);
+  const onSelect = bindChartValue(widget, selectedValue, onFocusValue, onInspect);
   if (!data.length) return null;
   const width = widget.type === 'line' ? 700 : 400;
   const height = 200;
@@ -845,39 +915,40 @@ function SeriesCard({
           <>
             <polygon points={`${paddingLeft},${height - paddingBottom} ${points} ${xAt(data.length - 1)},${height - paddingBottom}`} fill="rgba(138,51,36,0.08)" />
             <polyline points={points} fill="none" stroke="var(--accent)" strokeWidth="1.75" strokeLinejoin="round" />
-            {data.map((item, dataIndex) => (
+            {data.map((item, dataIndex) => {
+              const selected = groupIsSelected(item.x, selectedValue);
+              return (
               <circle
                 key={`${String(item.x)}-${dataIndex}`}
-                className="chart-hit"
-                data-inspect-widget={widgetFingerprint(widget)}
-                data-inspect-value={encodeURIComponent(String(item.x))}
+                className={chartGroupClass('chart-hit', item.x, selectedValue)}
+                {...chartGroupAttrs(widget, item.x, selectedValue)}
                 cx={xAt(dataIndex)}
                 cy={yScale(item.y)}
-                r="3.5"
-                fill="var(--bg-elev)"
+                r={selected ? 5 : 3.5}
+                fill={selected ? 'var(--accent)' : 'var(--bg-elev)'}
                 stroke="var(--accent)"
-                strokeWidth="1.25"
-                onClick={() => onInspect(widget, item.x)}
+                strokeWidth={selected ? 1.75 : 1.25}
+                onClick={() => onSelect(item.x)}
               >
                 <title>{String(item.x)}: {String(formatFull(item.y, widget.y, widget.format, { rows, schema }))}</title>
               </circle>
-            ))}
+              );
+            })}
           </>
         ) : data.map((item, dataIndex) => {
           const y = yScale(item.y);
           return (
             <rect
               key={`${String(item.x)}-${dataIndex}`}
-              className="chart-hit"
-              data-inspect-widget={widgetFingerprint(widget)}
-              data-inspect-value={encodeURIComponent(String(item.x))}
+              className={chartGroupClass('chart-hit', item.x, selectedValue)}
+              {...chartGroupAttrs(widget, item.x, selectedValue)}
               x={paddingLeft + dataIndex * xStep + xStep * 0.15}
               y={y}
               width={xStep * 0.7}
               height={height - paddingBottom - y}
               fill={color}
               opacity="0.85"
-              onClick={() => onInspect(widget, item.x)}
+              onClick={() => onSelect(item.x)}
             >
               <title>{String(item.x)}: {String(formatFull(item.y, widget.y, widget.format, { rows, schema }))}</title>
             </rect>
@@ -894,7 +965,9 @@ function SeriesCard({
           label: `${String(item.x)}: ${String(formatFull(item.y, widget.y, widget.format, { rows, schema }))}`,
           value: item.x,
         }))}
-        onInspect={value => onInspect(widget, value)}
+        selectedValue={selectedValue}
+        inspectWidget={widget}
+        onInspect={onSelect}
       />
       <ChartDataTable
         title={widget.title}
@@ -973,6 +1046,8 @@ function TableCard({
 export default function WidgetGrid({
   recipe,
   rows,
+  allRows,
+  filters,
   schema,
   changedWidgets,
   comparisons,
@@ -980,6 +1055,7 @@ export default function WidgetGrid({
   excludeOutliers,
   onAssumptions,
   onInspect,
+  onFocusValue,
   onRetry,
   onExportTable,
   onCopyTable,
@@ -993,6 +1069,14 @@ export default function WidgetGrid({
   const comparisonsByWidget = new Map(comparisons.map(comparison => [comparison.fingerprint, comparison]));
   const goalsByWidget = new Map(goals.map(goal => [goal.widgetFingerprint, goal]));
   const order = widgetDisplayOrder(recipe.widgets);
+  const rowsByFingerprint = useMemo(() => {
+    const map = new Map<string, Row[]>();
+    for (const widget of recipe.widgets) {
+      const fingerprint = widgetFingerprint(widget);
+      if (!map.has(fingerprint)) map.set(fingerprint, rowsForWidget(widget, allRows, filters, schema));
+    }
+    return map;
+  }, [allRows, filters, recipe.widgets, schema]);
   const dnd: WidgetDnd = {
     drag,
     onHandleDragStart: (index, event) => {
@@ -1045,14 +1129,16 @@ export default function WidgetGrid({
         const widget = recipe.widgets[index];
         const fingerprint = widgetFingerprint(widget);
         const className = changedWidgets.has(fingerprint) ? 'is-changed' : '';
+        const widgetRows = rowsByFingerprint.get(fingerprint) ?? rows;
+        const selectedValue = selectedEqualsValue(widget, filters);
         let content = null;
-        if (widget.type === 'kpi') content = <KpiCard widget={widget} index={index} rows={rows} schema={schema} comparison={comparisonsByWidget.get(fingerprint)} goal={goalsByWidget.get(fingerprint)} excludeOutliers={excludeOutliers} onAssumptions={onAssumptions} onInspect={onInspect} />;
+        if (widget.type === 'kpi') content = <KpiCard widget={widget} index={index} rows={widgetRows} schema={schema} comparison={comparisonsByWidget.get(fingerprint)} goal={goalsByWidget.get(fingerprint)} excludeOutliers={excludeOutliers} onAssumptions={onAssumptions} onInspect={onInspect} />;
         else if (widget.type === 'observations') content = <ObservationsCard widget={widget} index={index} onAssumptions={onAssumptions} onInspect={onInspect} />;
-        else if (widget.type === 'donut') content = <DonutCard widget={widget} index={index} rows={rows} schema={schema} onAssumptions={onAssumptions} onInspect={onInspect} />;
-        else if (widget.type === 'statlist') content = <StatListCard widget={widget} index={index} rows={rows} schema={schema} onAssumptions={onAssumptions} onInspect={onInspect} />;
-        else if (widget.type === 'countbar') content = <CountBarCard widget={widget} index={index} rows={rows} onAssumptions={onAssumptions} onInspect={onInspect} />;
-        else if (widget.type === 'line' || widget.type === 'bar') content = <SeriesCard widget={widget} index={index} rows={rows} schema={schema} onAssumptions={onAssumptions} onInspect={onInspect} />;
-        else if (widget.type === 'table') content = <TableCard widget={widget} index={index} rows={rows} schema={schema} fallback={!!recipe.fallback} onAssumptions={onAssumptions} onInspect={onInspect} onExport={onExportTable} onCopy={onCopyTable} />;
+        else if (widget.type === 'donut') content = <DonutCard widget={widget} index={index} rows={widgetRows} schema={schema} selectedValue={selectedValue} onAssumptions={onAssumptions} onInspect={onInspect} onFocusValue={onFocusValue} />;
+        else if (widget.type === 'statlist') content = <StatListCard widget={widget} index={index} rows={widgetRows} schema={schema} selectedValue={selectedValue} onAssumptions={onAssumptions} onInspect={onInspect} onFocusValue={onFocusValue} />;
+        else if (widget.type === 'countbar') content = <CountBarCard widget={widget} index={index} rows={widgetRows} selectedValue={selectedValue} onAssumptions={onAssumptions} onInspect={onInspect} onFocusValue={onFocusValue} />;
+        else if (widget.type === 'line' || widget.type === 'bar') content = <SeriesCard widget={widget} index={index} rows={widgetRows} schema={schema} selectedValue={selectedValue} onAssumptions={onAssumptions} onInspect={onInspect} onFocusValue={onFocusValue} />;
+        else if (widget.type === 'table') content = <TableCard widget={widget} index={index} rows={widgetRows} schema={schema} fallback={!!recipe.fallback} onAssumptions={onAssumptions} onInspect={onInspect} onExport={onExportTable} onCopy={onCopyTable} />;
         return <div key={`${fingerprint}-${index}`} data-fp={fingerprint} className={className} style={{ display: 'contents' }}>{content}</div>;
       })}
       </div>

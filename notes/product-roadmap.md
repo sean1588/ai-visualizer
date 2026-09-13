@@ -145,8 +145,12 @@ emits content-hashed assets, and the PNG renderer is bundled as a lazy chunk.
 - Widgets reorder by dragging a handle on fine pointers; keyboard users keep
   Move earlier/later. Touch hides the handle and keeps the `⋯` trigger at 44px.
 - Clicking a chart value opens the row inspector with Focus dashboard on
-  `{column} = {value}`; that path writes one equals filter per column so another
-  bar click moves focus instead of stacking contradictory rules.
+  `{column} = {value}`; that path writes one equals filter per column so the
+  first focus stays discoverable.
+- Once a chart is the focus source, it stays unfiltered on its own dimension:
+  the selected group keeps full colour, the rest dim, and a click moves focus
+  or clears the filter without reopening the inspector. Other widgets keep the
+  focused rows.
 - On viewports ≤720px the header is sticky and 48px tall: mark, a truncated
   breadcrumb, and a status pill reduced to its dot plus Saved / Refreshing… /
   Stale / Failed. Data, Export, Present, undo/redo, and the ⌘K hint move out of
