@@ -670,7 +670,7 @@ test("clicking a chart value focuses the dashboard and Chef suggestions stay sch
     await page.waitForSelector("#chef-fab.is-visible");
 
     const unfocusedKpi = await page.locator(".w-kpi .value").first().innerText();
-    await page.locator(".w-chart rect.chart-hit").first().click();
+    await page.locator('.w-chart rect.chart-hit[data-inspect-value="startup"]').click();
     await page.waitForSelector("#inspector-dialog[open]");
     assert.match(await page.locator("#focus-on-value").innerText(), /Focus dashboard on Segment = startup/i);
     await page.locator("#focus-on-value").click();
@@ -691,7 +691,7 @@ test("clicking a chart value focuses the dashboard and Chef suggestions stay sch
 
     await page.locator(".focus-chip-remove").click();
     await page.waitForFunction(() => document.querySelectorAll(".w-chart rect.chart-hit").length >= 3);
-    await page.locator(".w-chart rect.chart-hit").last().click();
+    await page.locator('.w-chart rect.chart-hit[data-inspect-value="enterprise"]').click();
     await page.waitForSelector("#inspector-dialog[open]");
     assert.match(await page.locator("#focus-on-value").innerText(), /enterprise/i);
     await page.locator("#focus-on-value").click();
@@ -718,7 +718,7 @@ test("clicking a chart value focuses the dashboard and Chef suggestions stay sch
     await page.locator(".focus-chip-remove").click();
     await page.waitForFunction(() => !document.querySelector("#focus-summary"));
 
-    await page.locator(".w-chart rect.chart-hit").first().click();
+    await page.locator('.w-chart rect.chart-hit[data-inspect-value="startup"]').click();
     await page.locator("#focus-on-value").click();
     await page.waitForSelector("#focus-summary");
     await page.locator("#focus-clear").click();

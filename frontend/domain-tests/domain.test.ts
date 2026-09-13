@@ -619,7 +619,7 @@ test('workbench goals, privacy scan, relationships, and follow-ups are determini
     observations: 6,
   });
   const questions = buildFollowUpQuestions(recipe, schema);
-  assert.deepEqual(questions.map(question => question.id), ['trend', 'segments', 'relationship', 'top-records', 'sort-table']);
+  assert.deepEqual(questions.map(question => question.id), ['sort-table', 'trend', 'segments', 'relationship', 'top-records']);
 });
 
 test('focus filters distinguish missing zeroes and compare date calendar days', () => {

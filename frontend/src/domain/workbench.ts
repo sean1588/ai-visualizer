@@ -300,39 +300,7 @@ export function buildFollowUpQuestions(
   const primary = numbers[0];
   const secondary = numbers[1];
   const questions: FollowUpQuestion[] = [];
-  if (date && primary) {
-    questions.push({
-      id: 'trend',
-      label: `How is ${primary.name} changing?`,
-      prompt: `Emphasize the trend in ${primary.name} over ${date.name}, including the latest direction.`,
-      reason: 'A time field and numeric metric are available.',
-    });
-  }
-  if (category && primary) {
-    questions.push({
-      id: 'segments',
-      label: `Which ${category.name} leads?`,
-      prompt: `Compare ${primary.name} across ${category.name}, sorted from highest to lowest.`,
-      reason: 'A segment can explain where the metric comes from.',
-    });
-  }
-  if (primary && secondary) {
-    questions.push({
-      id: 'relationship',
-      label: `Do ${primary.name} and ${secondary.name} move together?`,
-      prompt: `Add views that make the relationship between ${primary.name} and ${secondary.name} easy to assess.`,
-      reason: 'Two numeric measures can reveal a useful relationship.',
-    });
-  }
   const table = recipe.widgets.find(widget => widget.type === 'table');
-  if (table && primary) {
-    questions.push({
-      id: 'top-records',
-      label: `What are the top ${primary.name} rows?`,
-      prompt: `Sort the table by ${primary.name} descending and show the top 10 rows.`,
-      reason: 'The dashboard already includes row-level detail.',
-    });
-  }
   const donut = recipe.widgets.find(widget => widget.type === 'donut');
   if (donut) {
     questions.push({
@@ -365,6 +333,38 @@ export function buildFollowUpQuestions(
       label: 'Hide the observations',
       prompt: 'Hide the observations',
       reason: 'The tasting notes can be hidden without changing the metrics.',
+    });
+  }
+  if (date && primary) {
+    questions.push({
+      id: 'trend',
+      label: `How is ${primary.name} changing?`,
+      prompt: `Emphasize the trend in ${primary.name} over ${date.name}, including the latest direction.`,
+      reason: 'A time field and numeric metric are available.',
+    });
+  }
+  if (category && primary) {
+    questions.push({
+      id: 'segments',
+      label: `Which ${category.name} leads?`,
+      prompt: `Compare ${primary.name} across ${category.name}, sorted from highest to lowest.`,
+      reason: 'A segment can explain where the metric comes from.',
+    });
+  }
+  if (primary && secondary) {
+    questions.push({
+      id: 'relationship',
+      label: `Do ${primary.name} and ${secondary.name} move together?`,
+      prompt: `Add views that make the relationship between ${primary.name} and ${secondary.name} easy to assess.`,
+      reason: 'Two numeric measures can reveal a useful relationship.',
+    });
+  }
+  if (table && primary) {
+    questions.push({
+      id: 'top-records',
+      label: `What are the top ${primary.name} rows?`,
+      prompt: `Sort the table by ${primary.name} descending and show the top 10 rows.`,
+      reason: 'The dashboard already includes row-level detail.',
     });
   }
   return questions;
