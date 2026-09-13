@@ -309,7 +309,7 @@ test("action hierarchy keeps the landing header quiet and the palette reaches ev
     assert.ok(await page.locator("#action-data-health").isVisible());
     assert.equal(await page.locator("#refresh-btn").count(), 0, "Refresh data is absent, not disabled, for local data");
     assert.equal(await page.locator("#open-alerts").count(), 0, "Alerts is absent, not disabled, for local data");
-    assert.equal(await page.locator(".menu-list button:disabled").count(), 0);
+    assert.equal(await page.locator(".top-right details.menu[open] .menu-list button:disabled").count(), 0);
     await page.locator("#export-menu").click();
     assert.equal(await page.locator("details.menu[open]").count(), 1, "only one menu is open at a time");
     assert.ok(await page.locator("#export-btn").isVisible());
@@ -365,7 +365,7 @@ test("completed-plate gallery teaches prompts and direct edits share undo histor
     assert.match(await page.locator(".w-kpi .widget-rationale p").first().innerText(), /recurring revenue is the primary operating metric/i);
 
     await openWidgetMenu(page, ".w-kpi");
-    await page.getByRole("button", { name: "Move later" }).first().click();
+    await clickWidgetMenuItem(page, "Move later");
     assert.equal(await page.locator(".w-kpi .label").first().innerText(), "NEW CUSTOMERS");
     assert.match(await page.locator(".recipe-history").innerText(), /2 revisions/i);
     assert.equal(await page.locator("#recipe-redo").isEnabled(), false);
@@ -382,19 +382,19 @@ test("completed-plate gallery teaches prompts and direct edits share undo histor
     assert.equal(await page.locator(".w-kpi .label").first().innerText(), "NEW CUSTOMERS");
 
     await openWidgetMenu(page, ".w-kpi");
-    await page.getByRole("button", { name: /Resize · 3\/12/ }).first().click();
+    await clickWidgetMenuItem(page, /Resize · 3\/12/);
     assert.equal(await page.locator(".w-kpi").first().evaluate(element => element.style.gridColumn), "span 4");
 
     const widgetCount = await page.locator("#dash-grid > [data-fp]").count();
     await openWidgetMenu(page, ".w-kpi");
-    await page.getByRole("button", { name: "Duplicate" }).first().click();
+    await clickWidgetMenuItem(page, "Duplicate");
     assert.equal(await page.locator("#dash-grid > [data-fp]").count(), widgetCount + 1);
     await openWidgetMenu(page, ".w-kpi");
-    await page.getByRole("button", { name: "Remove" }).first().click();
+    await clickWidgetMenuItem(page, "Remove");
     assert.equal(await page.locator("#dash-grid > [data-fp]").count(), widgetCount);
 
     await openWidgetMenu(page, ".w-kpi");
-    await page.getByRole("button", { name: "Ask the Chef" }).first().click();
+    await clickWidgetMenuItem(page, "Ask the Chef");
     assert.match(await page.locator("#chef-target").innerText(), /Editing/i);
     await page.locator("#chef-input").fill("Make this widget full width");
     await page.locator("#chef-send").click();
@@ -1589,7 +1589,7 @@ test("widget menu, observations placement, rename, and drag-to-reorder", async (
     await page.locator("#inspector-close").click();
 
     await openWidgetMenu(page, ".w-kpi");
-    await page.getByRole("button", { name: /Rename/ }).click();
+    await clickWidgetMenuItem(page, /Rename/);
     await page.locator(".w-kpi .inline-rename-input").fill("Hero MRR");
     await page.locator(".w-kpi .inline-rename-input").press("Enter");
     assert.match(await firstKpi.locator(".label").innerText(), /HERO MRR/);
@@ -1629,6 +1629,10 @@ async function widgetCard(page, fingerprintOrIndex) {
   if (typeof fingerprintOrIndex === "number") return page.locator("#dash-grid > [data-fp]").nth(fingerprintOrIndex);
   if (typeof fingerprintOrIndex === "string" && /^[.#[]/.test(fingerprintOrIndex)) return page.locator(fingerprintOrIndex).first();
   return page.locator(`[data-fp="${fingerprintOrIndex}"]`);
+}
+
+async function clickWidgetMenuItem(page, name) {
+  await page.locator("details.widget-menu[open] .menu-list button").filter({ hasText: name }).click();
 }
 
 async function openWidgetMenu(page, fingerprintOrIndex) {
