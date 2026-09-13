@@ -38,6 +38,7 @@ import {
   toCanonicalWidgets,
   validateRecipe,
   widgetFingerprint,
+  widgetDisplayOrder,
   type DashboardFilter,
   type DashboardRecipe,
   type KpiGoal,
@@ -636,6 +637,49 @@ test('goal evaluation shares last-point outlier policy and direction-aware progr
   assert.equal(missedAtMost.progress, 50);
   const zeroTarget = evaluateKpiGoals([{ ...base, direction: 'at-least', target: 0 }], [{ value: -1 }], schema)[0];
   assert.equal(zeroTarget.progress, 0);
+});
+
+test('widget display order places observations after a leading KPI run', () => {
+  assert.deepEqual(
+    widgetDisplayOrder([
+      { type: 'observations' },
+      { type: 'kpi' },
+      { type: 'kpi' },
+      { type: 'line' },
+      { type: 'table' },
+    ]),
+    [1, 2, 0, 3, 4],
+  );
+  assert.deepEqual(
+    widgetDisplayOrder([
+      { type: 'kpi' },
+      { type: 'kpi' },
+      { type: 'line' },
+      { type: 'observations' },
+    ]),
+    [0, 1, 3, 2],
+  );
+  assert.deepEqual(
+    widgetDisplayOrder([
+      { type: 'line' },
+      { type: 'observations' },
+      { type: 'kpi' },
+    ]),
+    [0, 1, 2],
+  );
+  assert.deepEqual(
+    widgetDisplayOrder([{ type: 'kpi' }, { type: 'line' }]),
+    [0, 1],
+  );
+  assert.deepEqual(
+    widgetDisplayOrder([
+      { type: 'kpi' },
+      { type: 'observations' },
+      { type: 'kpi' },
+      { type: 'line' },
+    ]),
+    [0, 2, 1, 3],
+  );
 });
 
 test('privacy scan covers complete datasets and normalized camel-case names', () => {

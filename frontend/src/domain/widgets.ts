@@ -81,3 +81,17 @@ export function hashString(value: unknown): number {
   }
   return Math.abs(hash);
 }
+
+export function widgetDisplayOrder(widgets: readonly { type: string }[]): number[] {
+  const indices = widgets.map((_, index) => index);
+  const observationsIndex = widgets.findIndex(widget => widget.type === 'observations');
+  if (observationsIndex < 0) return indices;
+  const withoutObservations = indices.filter(index => index !== observationsIndex);
+  const first = withoutObservations[0];
+  if (first === undefined || widgets[first].type !== 'kpi') return indices;
+  let kpiRun = 0;
+  while (kpiRun < withoutObservations.length && widgets[withoutObservations[kpiRun]].type === 'kpi') {
+    kpiRun += 1;
+  }
+  return [...withoutObservations.slice(0, kpiRun), observationsIndex, ...withoutObservations.slice(kpiRun)];
+}
