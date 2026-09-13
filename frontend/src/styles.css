@@ -461,6 +461,9 @@
   .chef-msg-chef .undo-btn:hover { color: var(--accent); }
   .chef-msg-chef.is-undone { opacity: 0.5; }
   .chef-msg-chef.is-undone .undo-btn { display: none; }
+  .chef-try-next { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+  .chef-try-next-label { font-family: var(--font-mono); font-style: normal; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-mute); }
+  .chef-try-next .chef-suggestion { padding: 6px 8px; font-size: 10px; }
 
   /* widget-change pulse */
   @keyframes wPulse {
@@ -487,6 +490,11 @@
   .focus-summary { display: flex; align-items: center; gap: 9px; width: max-content; margin-top: 8px; padding: 5px 8px; border: 1px solid var(--accent-2); background: var(--bg-elev); font-family: var(--font-mono); font-size: 9.5px; color: var(--fg-mute); }
   .focus-summary strong { color: var(--accent-2); text-transform: uppercase; letter-spacing: .06em; }
   .focus-summary button { padding: 0; border: 0; border-bottom: 1px solid var(--rule-soft); background: transparent; color: var(--fg); font: inherit; cursor: pointer; }
+  .focus-chips { flex-wrap: wrap; max-width: 100%; }
+  .focus-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; border: 1px solid var(--rule-soft); background: var(--bg); }
+  .focus-chip-body { border-bottom: 0; }
+  .focus-chip-remove { padding: 0 4px; line-height: 1; }
+  #inspector-dialog .dialog-head .btn-primary { margin-top: 10px; }
   .dashboard-context { max-width: 74ch; margin: 10px 0 0; padding-left: 10px; border-left: 3px solid var(--accent-3); color: var(--fg-mute); font-size: 12.5px; white-space: pre-wrap; }
   .kpi-goal { display: grid; gap: 5px; margin-top: 9px; padding-top: 8px; border-top: 1px dashed var(--rule-soft); }
   .kpi-goal > div:first-child { display: flex; justify-content: space-between; gap: 10px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-mute); }
@@ -568,7 +576,8 @@
   .command-item[aria-selected="true"] { background: var(--bg-soft); box-shadow: inset 3px 0 0 var(--accent); }
   .command-empty { padding: 18px 10px; color: var(--fg-mute); }
   .presentation-exit { position: fixed; top: 14px; right: 16px; z-index: 80; box-shadow: 3px 3px 0 var(--rule); }
-  body.presentation-mode .top, body.presentation-mode .dash-actions, body.presentation-mode .recipe-history, body.presentation-mode .recurring-report, body.presentation-mode .chef-fab, body.presentation-mode .chef-panel, body.presentation-mode .w-actions, body.presentation-mode .table-toolbar, body.presentation-mode #data-health-btn, body.presentation-mode .focus-summary button, body.presentation-mode .focus-empty button { display: none !important; }
+  body.presentation-mode .top, body.presentation-mode .dash-actions, body.presentation-mode .recipe-history, body.presentation-mode .recurring-report, body.presentation-mode .chef-fab, body.presentation-mode .chef-panel, body.presentation-mode .w-actions, body.presentation-mode .table-toolbar, body.presentation-mode #data-health-btn, body.presentation-mode .focus-chip-remove, body.presentation-mode #focus-clear, body.presentation-mode .focus-empty button { display: none !important; }
+  body.presentation-mode .focus-chip-body { pointer-events: none; cursor: default; border-bottom: 0; }
   body.presentation-mode .dash-head { padding: 34px 40px 20px; }
   body.presentation-mode .dash-grid { padding: 22px 40px 50px; }
   @media (max-width: 980px) {
@@ -730,7 +739,7 @@ button.recent-card { width: 100%; color: inherit; text-align: left; font: inheri
 [data-fp].is-changed > .w { animation: wPulse 1.6s ease-out 1; }
 
 @media (pointer: coarse) {
-  .btn, .widget-action, .assumption-chip, .widget-rationale > summary, .widget-edit > summary, .widget-menu-trigger, .legend-button, .statlist-key, .recent-card, .example-open, .dialog-close, .workbench-tabs button, .active-filter-list button, .workbench-form input, .workbench-form select, .saved-view-panel input, #saved-view-list article > button, .goal-list article > button, .menu > summary, .menu-list button, .recipe-history > summary, .theme-picker select, .command-input, .command-item, .obs-more > summary { min-height: 44px; }
+  .btn, .widget-action, .assumption-chip, .widget-rationale > summary, .widget-edit > summary, .widget-menu-trigger, .legend-button, .statlist-key, .recent-card, .example-open, .dialog-close, .workbench-tabs button, .active-filter-list button, .workbench-form input, .workbench-form select, .saved-view-panel input, #saved-view-list article > button, .goal-list article > button, .menu > summary, .menu-list button, .recipe-history > summary, .theme-picker select, .command-input, .command-item, .obs-more > summary, #focus-on-value, .focus-chip-body, .focus-chip-remove, #focus-clear, .chef-suggestion { min-height: 44px; }
   #saved-view-list article > button:last-child, .goal-list article > button, .widget-menu-trigger { min-width: 44px; }
   .widget-drag-handle { display: none; }
 }

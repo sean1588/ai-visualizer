@@ -413,7 +413,7 @@ test("Chef edit removes observations without dropping valid dashboard widgets", 
     await page.waitForSelector("#chef-fab.is-visible");
 
     await page.locator("#chef-fab").click();
-    await page.getByText("Hide the observations widget").click();
+    await page.locator("#chef-empty .chef-suggestion[data-prompt='Hide the observations']").click();
     await page.waitForFunction(() => !document.body.innerText.includes("What stood out"));
 
     const text = await page.locator("body").innerText();
@@ -433,7 +433,7 @@ test("Chef refuses suspicious partial recipes instead of applying table-only col
     await page.waitForSelector("#chef-fab.is-visible");
 
     await page.locator("#chef-fab").click();
-    await page.getByText("Hide the observations widget").click();
+    await page.locator("#chef-empty .chef-suggestion[data-prompt='Hide the observations']").click();
     await page.waitForFunction(() => document.body.innerText.includes("The chef returned an incomplete recipe"));
 
     const text = await page.locator("body").innerText();
@@ -663,6 +663,95 @@ test("chart points and legends open the contributing-row inspector", async () =>
   });
 });
 
+test("clicking a chart value focuses the dashboard and Chef suggestions stay schema-aware", async () => {
+  await withPage(async page => {
+    await mockInference(page, CHEF_WITHOUT_OBSERVATIONS, AGGREGATE_PLAN);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.locator("#paste").fill(JSON.stringify(SEGMENT_REVENUE, null, 2));
+    await page.locator("#render-btn").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+
+    const unfocusedKpi = await page.locator(".w-kpi .value").first().innerText();
+    await page.locator('.w-chart rect.chart-hit[data-inspect-value="startup"]').click();
+    await page.waitForSelector("#inspector-dialog[open]");
+    assert.match(await page.locator("#focus-on-value").innerText(), /Focus dashboard on Segment = startup/i);
+    await page.locator("#focus-on-value").click();
+    await page.waitForFunction(() => document.querySelector("#focus-summary")?.textContent?.includes("2 of 5 rows"));
+    assert.match(await page.locator("#focus-summary").innerText(), /Focused · 2 of 5 rows/i);
+    assert.equal(await page.locator(".focus-chip").count(), 1);
+    assert.match(await page.locator(".focus-chip-body").innerText(), /Segment is startup/i);
+    const focusedKpi = await page.locator(".w-kpi .value").first().innerText();
+    assert.notEqual(focusedKpi, unfocusedKpi);
+    assert.match(focusedKpi, /\$20k/i);
+    assert.deepEqual(await page.evaluate(() => window.__mise.state.filters.map(filter => filter.value)), ["startup"]);
+
+    await page.locator(".w-chart rect.chart-hit").first().click();
+    await page.waitForSelector("#inspector-dialog[open]");
+    await page.locator("#focus-on-value").click();
+    assert.equal(await page.locator(".focus-chip").count(), 1);
+    assert.deepEqual(await page.evaluate(() => window.__mise.state.filters.map(filter => filter.value)), ["startup"]);
+
+    await page.locator(".focus-chip-remove").click();
+    await page.waitForFunction(() => document.querySelectorAll(".w-chart rect.chart-hit").length >= 3);
+    await page.locator('.w-chart rect.chart-hit[data-inspect-value="enterprise"]').click();
+    await page.waitForSelector("#inspector-dialog[open]");
+    assert.match(await page.locator("#focus-on-value").innerText(), /enterprise/i);
+    await page.locator("#focus-on-value").click();
+    await page.waitForFunction(() => document.querySelector("#focus-summary")?.textContent?.includes("enterprise"));
+    assert.equal(await page.locator(".focus-chip").count(), 1);
+    assert.match(await page.locator("#focus-summary").innerText(), /Focused · 1 of 5 rows/i);
+    assert.match(await page.locator(".w-kpi .value").first().innerText(), /\$60k/i);
+    assert.deepEqual(await page.evaluate(() => window.__mise.state.filters.map(filter => filter.value)), ["enterprise"]);
+
+    await page.locator("#presentation-mode").click();
+    await page.waitForFunction(() => document.body.classList.contains("presentation-mode"));
+    assert.match(await page.locator("#focus-summary").innerText(), /Segment is enterprise/i);
+    assert.equal(await page.locator("#focus-clear").isVisible(), false);
+    assert.equal(await page.locator(".focus-chip-remove").isVisible(), false);
+    assert.equal(await page.locator(".focus-chip-body").isVisible(), true);
+    await page.locator("#exit-presentation").click();
+    await page.waitForFunction(() => !document.body.classList.contains("presentation-mode"));
+
+    await page.locator(".focus-chip-body").click();
+    await page.waitForSelector("#analysis-workbench[open]");
+    assert.match(await page.locator("#analysis-workbench button.active").innerText(), /Focus/i);
+    await closeWorkbench(page);
+
+    await page.locator(".focus-chip-remove").click();
+    await page.waitForFunction(() => !document.querySelector("#focus-summary"));
+
+    await page.locator('.w-chart rect.chart-hit[data-inspect-value="startup"]').click();
+    await page.locator("#focus-on-value").click();
+    await page.waitForSelector("#focus-summary");
+    await page.locator("#focus-clear").click();
+    await page.waitForFunction(() => !document.querySelector("#focus-summary"));
+  });
+});
+
+test("Chef empty-state suggestions use the current recipe and offer Try next after a reply", async () => {
+  await withPage(async page => {
+    await mockInference(page);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await page.getByText("SAAS METRICS").click();
+    await page.waitForSelector("#chef-fab.is-visible");
+    await page.locator("#chef-fab").click();
+    await page.waitForSelector("#chef-panel.is-open");
+    const suggestionLabels = await page.locator("#chef-empty .chef-suggestion").allTextContents();
+    assert.ok(suggestionLabels.length >= 1 && suggestionLabels.length <= 5);
+    assert.ok(suggestionLabels.some(label => /Current MRR|Monthly metrics|Hide the observations/i.test(label)));
+    assert.ok(suggestionLabels.every(label => !/Swap the donut/i.test(label)));
+    assert.doesNotMatch(await page.locator(".chef-empty-title").innerText(), /donut/i);
+    const firstPrompt = await page.locator("#chef-empty .chef-suggestion").first().getAttribute("data-prompt");
+    await page.locator("#chef-empty .chef-suggestion").first().click();
+    await page.waitForFunction(() => document.querySelector("#chef-msgs")?.innerText.includes("Trimmed"));
+    await page.locator("#chef-try-next").waitFor();
+    assert.match(await page.locator("#chef-try-next").innerText(), /Try next/i);
+    assert.ok(await page.locator("#chef-try-next .chef-suggestion").count() >= 1);
+    assert.ok(await page.locator("#chef-try-next .chef-suggestion").count() <= 3);
+    assert.equal(firstPrompt, await page.evaluate(() => window.__mise.state.chefHistory[0].content));
+  }, { allowConsole: /AI response did not validate, falling back/ });
+});
+
 test("charts expose summaries, data tables, keyboard inspection, and live status", async () => {
   await withPage(async page => {
     await mockInference(page);
@@ -877,7 +966,8 @@ test("analysis workbench keeps ten browser-local enhancements cohesive and persi
     await workbench.locator("#focus-filter-form input[name=value]").fill("Pro");
     await workbench.locator("#focus-filter-form button[type=submit]").click();
     await page.waitForFunction(() => document.querySelector("#focus-summary")?.textContent?.includes("5 of 7 rows"));
-    assert.match(await page.locator("#focus-summary").innerText(), /1 active filter/i);
+    assert.match(await page.locator("#focus-summary").innerText(), /Focused/i);
+    assert.match(await page.locator("#focus-summary").innerText(), /Segment is Pro/i);
 
     await workbench.locator("#save-view-form input[name=name]").fill("Pro accounts");
     await workbench.locator("#save-view-form button[type=submit]").click();
@@ -902,7 +992,7 @@ test("analysis workbench keeps ten browser-local enhancements cohesive and persi
     assert.match(await workbench.locator("#correlation-list").innerText(), /Revenue ↔ Orders/i);
     assert.match(await workbench.locator("#privacy-finding-list").innerText(), /Customer email/i);
     assert.ok(await workbench.locator("#follow-up-list button").count() >= 3);
-    await workbench.locator("#follow-up-list button").first().click();
+    await workbench.locator("#follow-up-list button").filter({ hasText: /changing/i }).click();
     await page.waitForSelector("#chef-panel.is-open");
     assert.match(await page.locator("#chef-input").inputValue(), /Emphasize the trend/i);
     await page.locator("#chef-close").click();
@@ -1194,7 +1284,7 @@ test("local dashboards replace data against the same recipe and report schema dr
     await page.reload({ waitUntil: "networkidle" });
     await page.getByText("Segment Revenue").first().click();
     assert.equal(await page.locator("#dataset-comparison").count(), 0);
-    await page.locator("#focus-summary button").click();
+    await page.locator("#focus-clear").click();
     assert.match(await page.locator("#dataset-comparison").innerText(), /added gross_margin/i);
   });
 });

@@ -144,6 +144,15 @@ emits content-hashed assets, and the PNG renderer is bundled as a lazy chunk.
   F2); empty titles revert and the change is undoable.
 - Widgets reorder by dragging a handle on fine pointers; keyboard users keep
   Move earlier/later. Touch hides the handle and keeps the `⋯` trigger at 44px.
+- Clicking a chart value opens the row inspector with Focus dashboard on
+  `{column} = {value}`; that path writes one equals filter per column so another
+  bar click moves focus instead of stacking contradictory rules.
+- Active filters render as dismissible chips in the dashboard head (`Focused · n
+  of N rows`); chip text stays visible in presentation mode while × and Clear all
+  hide with the rest of the chrome.
+- Chef empty-state suggestions and a Try next row after a successful reply come
+  from schema-aware `buildFollowUpQuestions`, including prompts grounded in the
+  actual donut, table, KPI, and observations widgets on the plate.
 
 ## Architecture boundaries
 

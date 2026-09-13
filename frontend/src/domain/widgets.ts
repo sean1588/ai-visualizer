@@ -16,6 +16,10 @@ export function widgetGroup(widget: unknown): string | null {
   return typeof group === 'string' ? group : null;
 }
 
+export function inspectedColumn(widget: RenderedWidget): string | null {
+  return widgetGroup(widget);
+}
+
 export function widgetFingerprint(widget: unknown): string {
   const record = widgetRecord(widget);
   if (!record?.type) return '';
