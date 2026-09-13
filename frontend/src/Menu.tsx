@@ -1,11 +1,14 @@
-import { useEffect, useRef, type KeyboardEvent, type SyntheticEvent } from 'react';
+import { useEffect, useRef, type KeyboardEvent, type RefObject, type SyntheticEvent } from 'react';
 
 import { actionElementId, type DashboardAction } from './actions';
 
-export default function Menu({ id, label, actions, sheet = false }: { id: string; label: string; actions: DashboardAction[]; sheet?: boolean }) {
-  const ref = useRef<HTMLDetailsElement>(null);
-  const items = actions.filter(action => action.visible);
+export function closeOpenMenus(except?: HTMLElement | null) {
+  document.querySelectorAll<HTMLDetailsElement>('details.menu[open], details.recipe-history[open]').forEach(other => {
+    if (other !== except) other.removeAttribute('open');
+  });
+}
 
+export function useMenu(ref: RefObject<HTMLDetailsElement | null>) {
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
       const details = ref.current;
@@ -13,9 +16,7 @@ export default function Menu({ id, label, actions, sheet = false }: { id: string
     };
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, []);
-
-  if (!items.length) return null;
+  }, [ref]);
 
   const close = () => {
     const details = ref.current;
@@ -25,9 +26,7 @@ export default function Menu({ id, label, actions, sheet = false }: { id: string
   };
   const handleToggle = (event: SyntheticEvent<HTMLDetailsElement>) => {
     if (!event.currentTarget.open) return;
-    document.querySelectorAll<HTMLDetailsElement>('details.menu[open]').forEach(other => {
-      if (other !== event.currentTarget) other.removeAttribute('open');
-    });
+    closeOpenMenus(event.currentTarget);
   };
   const handleKeyDown = (event: KeyboardEvent<HTMLDetailsElement>) => {
     const details = ref.current;
@@ -47,6 +46,15 @@ export default function Menu({ id, label, actions, sheet = false }: { id: string
       buttons[(index + step + buttons.length) % buttons.length].focus();
     }
   };
+  return { close, handleToggle, handleKeyDown };
+}
+
+export default function Menu({ id, label, actions, sheet = false }: { id: string; label: string; actions: DashboardAction[]; sheet?: boolean }) {
+  const ref = useRef<HTMLDetailsElement>(null);
+  const { close, handleToggle, handleKeyDown } = useMenu(ref);
+  const items = actions.filter(action => action.visible);
+
+  if (!items.length) return null;
 
   return (
     <details className={sheet ? 'menu menu-sheet' : 'menu'} ref={ref} onToggle={handleToggle} onKeyDown={handleKeyDown}>

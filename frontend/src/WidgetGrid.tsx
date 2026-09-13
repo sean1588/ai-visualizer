@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type SyntheticEvent } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 
 import {
   aggregateBy,
@@ -29,6 +29,7 @@ import {
   type SeriesWidget,
   type TableWidget,
 } from './domain';
+import { useMenu } from './Menu';
 
 interface WidgetGridProps {
   recipe: DashboardRecipe;
@@ -233,6 +234,7 @@ export function InlineRename({
           }
           if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopPropagation();
             cancel();
           }
         }}
@@ -316,49 +318,10 @@ function WidgetActions({
   const editor = useContext(WidgetEditorContext);
   const dnd = useContext(WidgetDndContext);
   const menuRef = useRef<HTMLDetailsElement>(null);
+  const { close, handleToggle, handleKeyDown } = useMenu(menuRef);
   const title = widgetLabel(widget);
   const triggerId = `widget-menu-${index}`;
   const fingerprint = widgetFingerprint(widget);
-
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      const details = menuRef.current;
-      if (details?.open && event.target instanceof Node && !details.contains(event.target)) details.removeAttribute('open');
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, []);
-
-  const close = () => {
-    const details = menuRef.current;
-    if (!details) return;
-    details.removeAttribute('open');
-    details.querySelector<HTMLElement>('summary')?.focus();
-  };
-  const handleToggle = (event: SyntheticEvent<HTMLDetailsElement>) => {
-    if (!event.currentTarget.open) return;
-    document.querySelectorAll<HTMLDetailsElement>('details.menu[open]').forEach(other => {
-      if (other !== event.currentTarget) other.removeAttribute('open');
-    });
-  };
-  const handleKeyDown = (event: KeyboardEvent<HTMLDetailsElement>) => {
-    const details = menuRef.current;
-    if (!details?.open) return;
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopPropagation();
-      close();
-      return;
-    }
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      const buttons = Array.from(details.querySelectorAll<HTMLButtonElement>('.menu-list button:not(:disabled)'));
-      if (!buttons.length) return;
-      const index = buttons.findIndex(button => button === document.activeElement);
-      const step = event.key === 'ArrowDown' ? 1 : -1;
-      buttons[(index + step + buttons.length) % buttons.length].focus();
-    }
-  };
   const edit = (action: WidgetEditAction, payload?: string) => {
     close();
     editor?.onEdit(index, action, payload);

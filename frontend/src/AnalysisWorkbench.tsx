@@ -197,7 +197,7 @@ export default function AnalysisWorkbench({
   return (
     <dialog id="analysis-workbench" className="mise-dialog workbench-dialog" ref={ref} aria-labelledby="workbench-title" onClose={onClose}>
       <div className="dialog-head">
-        <div><div className="eyebrow eyebrow-accent">Analysis workbench</div><h2 id="workbench-title">Explore without changing the recipe.</h2></div>
+        <div><div className="eyebrow eyebrow-accent">Analyze</div><h2 id="workbench-title">Explore without changing the recipe.</h2></div>
         <CloseButton onClose={() => ref.current?.close()} />
       </div>
       <nav className="workbench-tabs" aria-label="Analysis tools">

@@ -35,9 +35,9 @@ export default function DataHealthDialog({
   }, [open]);
   if (!health) return null;
   return (
-    <dialog id="data-health-dialog" className="mise-dialog" ref={dialogRef} onClose={onClose}>
+    <dialog id="data-health-dialog" className="mise-dialog" ref={dialogRef} aria-labelledby="data-health-title" onClose={onClose}>
       <div className="dialog-head">
-        <div><div className="eyebrow eyebrow-accent">Data health</div><h2>What Mise kept, flagged, and ignored</h2></div>
+        <div><div className="eyebrow eyebrow-accent">Data health</div><h2 id="data-health-title">What Mise kept, flagged, and ignored</h2></div>
         <button className="dialog-close" type="button" aria-label="Close" onClick={() => dialogRef.current?.close()}>×</button>
       </div>
       <div className="dialog-body">

@@ -196,7 +196,7 @@ function statusLabel(state: AppState): { text: string; saved: boolean; short: st
     if (freshness.status === 'stale') return { text: 'Stale · refresh available', saved: false, short: 'Stale' };
   }
   if (state.id && state.updatedAt) return { text: `Saved in this browser · ${relativeTime(state.updatedAt)}`, saved: true, short: 'Saved' };
-  return { text: 'Not saved yet', saved: false, short: 'Saved' };
+  return { text: 'Not saved yet', saved: false, short: 'Unsaved' };
 }
 
 function signedCount(value: number, noun: string): string {
@@ -376,7 +376,7 @@ function AssumptionsDialog({
     if (validated.widgets[0]) onApply(validated.widgets[0]);
   };
   return (
-    <dialog id="assumptions-dialog" className="mise-dialog" ref={dialogRef} onClose={onClose}>
+    <dialog id="assumptions-dialog" className="mise-dialog" ref={dialogRef} aria-labelledby="assumptions-title" onClose={onClose}>
       <form id="assumptions-form" method="dialog" onSubmit={handleSubmit}>
         <div className="dialog-head">
           <div><div className="eyebrow eyebrow-accent">Widget assumptions</div><h2 id="assumptions-title">{widget.title || ('label' in widget ? widget.label : humanize(widget.type))}</h2></div>
@@ -462,7 +462,7 @@ function InspectorDialog({ state, onClose, onFocusValue }: { state: AppState; on
   const widgetTitle = inspector.widget.title || ('label' in inspector.widget ? inspector.widget.label : 'Widget');
   const focusColumn = inspector.selectedValue == null ? null : inspectedColumn(inspector.widget);
   return (
-    <dialog id="inspector-dialog" className="mise-dialog" ref={dialogRef} onClose={onClose}>
+    <dialog id="inspector-dialog" className="mise-dialog" ref={dialogRef} aria-labelledby="inspector-title" onClose={onClose}>
       <div className="dialog-head">
         <div>
           <div className="eyebrow eyebrow-accent">Contributing data</div>
@@ -554,6 +554,7 @@ function App() {
           kpiGoals: [],
           dashboardNotes: '',
           workbenchOpen: false,
+          paletteOpen: false,
           presentationMode: false,
         },
       });
@@ -733,6 +734,7 @@ function App() {
         dashboardNotes: options.notes ?? notes,
         workbenchOpen: false,
         presentationMode: false,
+        paletteOpen: false,
         statusMessage: null,
         statusError: false,
       },
@@ -1066,7 +1068,7 @@ function App() {
       clone.querySelector('#recurring-report')?.remove();
       clone.querySelector('.dash-actions')?.remove();
       clone.querySelector('.recipe-history')?.remove();
-      clone.querySelectorAll('.widget-action,.assumption-chip,.widget-edit,.widget-menu,.widget-drag-handle,.table-export-btn,.retry-ai-btn,#data-health-btn').forEach(element => element.remove());
+      clone.querySelectorAll('.widget-menu,.widget-drag-handle,.retry-ai-btn,#data-health-btn').forEach(element => element.remove());
       const html = buildStandaloneHtml({
         title: current.recipe.title,
         dashboardHtml: clone.outerHTML,
@@ -1261,8 +1263,14 @@ function App() {
     if (!current.recipe) return;
     if (!current.presentationMode) {
       presentationReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      document.querySelectorAll<HTMLDetailsElement>('details.menu[open], details.recipe-history[open]').forEach(details => details.removeAttribute('open'));
+      dispatch({
+        type: 'patch',
+        value: { presentationMode: true, chefOpen: false, chefWidgetIndex: null, workbenchOpen: false, paletteOpen: false },
+      });
+      return;
     }
-    dispatch({ type: 'patch', value: { presentationMode: !current.presentationMode } });
+    dispatch({ type: 'patch', value: { presentationMode: false } });
   }, []);
 
   const updateAlerts = useCallback((alerts: ThresholdAlert[]) => {
@@ -1391,16 +1399,12 @@ function App() {
 
   const applyEqualsFocus = useCallback((column: string, value: unknown, widgetType?: string) => {
     const current = stateRef.current;
-    track('focus_from_chart', { widgetType: widgetType ?? current.inspector?.widget.type });
     const filters = setEqualsFilter(current.filters, column, value, `filter_${Date.now().toString(36)}`);
     if (filters === current.filters) return;
+    track('focus_from_chart', { widgetType: widgetType ?? current.inspector?.widget.type });
     updateWorkbench({ filters });
     flashStatus(`Focused on ${String(value)}`);
   }, [flashStatus, updateWorkbench]);
-
-  const focusOnInspectorValue = useCallback((column: string, value: unknown) => {
-    applyEqualsFocus(column, value);
-  }, [applyEqualsFocus]);
 
   const focusOnWidgetValue = useCallback((widget: RenderedWidget, value: unknown) => {
     const column = inspectedColumn(widget);
@@ -1525,6 +1529,7 @@ function App() {
         kpiGoals: Array.isArray(recent.kpiGoals) ? recent.kpiGoals : [],
         dashboardNotes: typeof recent.dashboardNotes === 'string' ? recent.dashboardNotes : '',
         workbenchOpen: false,
+        paletteOpen: false,
         presentationMode: false,
         previousSnapshot: recent.previousSnapshot || null,
         updatedAt: recent.updatedAt || recent.savedAt,
@@ -1729,12 +1734,13 @@ function App() {
           dispatch({ type: 'patch', value: { paletteOpen: false } });
           return;
         }
-        const openMenu = document.querySelector<HTMLDetailsElement>('details.menu[open]');
+        const openMenu = document.querySelector<HTMLDetailsElement>('details.menu[open], details.recipe-history[open]');
         if (openMenu) {
           openMenu.removeAttribute('open');
           openMenu.querySelector<HTMLElement>('summary')?.focus();
           return;
         }
+        if (document.querySelector('dialog[open]')) return;
         if (current.workbenchOpen) {
           dispatch({ type: 'patch', value: { workbenchOpen: false } });
           return;
@@ -1747,6 +1753,7 @@ function App() {
         return;
       }
       if (modifier && key === 'k') {
+        if (current.presentationMode) return;
         event.preventDefault();
         dispatch({ type: 'patch', value: { paletteOpen: !current.paletteOpen } });
         return;
@@ -1758,6 +1765,13 @@ function App() {
         return;
       }
       if (modifier || event.altKey || document.querySelector('dialog[open]')) return;
+      if (current.presentationMode) {
+        if (key === 'p' && !event.shiftKey) {
+          event.preventDefault();
+          runAction('present');
+        }
+        return;
+      }
       if (event.key === '/') {
         event.preventDefault();
         runAction('chef');
@@ -1789,7 +1803,7 @@ function App() {
         </div>
         {showDashboardChrome && (
           <div className="top-right">
-            <span id="status-pill" className="pill" role="status" aria-live="polite"><span className={`pill-dot ${status.saved ? 'active' : ''}`} /><span className="status-full">{status.text}</span><span className="status-short" aria-hidden="true">{status.short}</span></span>
+            <span id="status-pill" className="pill" role="status" aria-live="polite"><span className={`pill-dot ${status.saved ? 'active' : ''}`} /><span className="status-full">{status.text}</span><span className="status-short">{status.short}</span></span>
             {!compact && (
               <>
                 {undoAction?.visible && <button id="recipe-undo" className="btn btn-ghost btn-icon" type="button" aria-label="Undo" title={`Undo · ${undoAction.shortcut}`} disabled={!undoAction.enabled} onClick={undoAction.run}>↶</button>}
@@ -1930,13 +1944,13 @@ function App() {
               onCopyTable={widget => void copyTable(widget)}
               onEditWidget={editWidget}
               onChefWidget={openChefForWidget}
-            /> : <div id="focus-empty" className="focus-empty" role="status"><strong>No rows match this focused view.</strong><span>Clear or adjust a filter in the Analysis workbench to bring the dashboard back.</span><button type="button" className="btn btn-primary" onClick={() => updateWorkbench({ filters: [] })}>Clear filters</button></div>}
+            /> : <div id="focus-empty" className="focus-empty" role="status"><strong>No rows match this focused view.</strong><span>Clear or adjust a filter under Analyze to bring the dashboard back.</span><button type="button" className="btn btn-primary" onClick={() => updateWorkbench({ filters: [] })}>Clear filters</button></div>}
           </>
         )}
       </section>
 
       {showDashboardChrome && compact && !state.presentationMode && !state.chefOpen && !state.workbenchOpen && <MobileActionBar actions={dashboardActions} />}
-      {state.stage === 'dash' && !state.chefOpen && <button id="chef-fab" className="chef-fab is-visible" type="button" onClick={() => dispatch({ type: 'patch', value: { chefOpen: true, chefWidgetIndex: null } })}><span className="chef-fab-glyph">M</span><span>Talk to the chef</span></button>}
+      {state.stage === 'dash' && !state.chefOpen && <button id="chef-fab" className="chef-fab is-visible" type="button" onClick={() => dispatch({ type: 'patch', value: { chefOpen: true, chefWidgetIndex: null } })}><span className="chef-fab-glyph">M</span><span>Talk to the Chef</span></button>}
       <aside id="chef-panel" className={`chef-panel ${state.chefOpen ? 'is-open' : ''}`} aria-label="The Chef">
         <div className="chef-hd"><div className="chef-hd-l"><span className="chef-hd-glyph">M</span><span className="chef-hd-name">The Chef</span>{chefTargetLabel && <span id="chef-target" className="chef-hd-tag">Editing · {chefTargetLabel}</span>}</div><button id="chef-close" className="chef-close" type="button" aria-label="Close" onClick={() => dispatch({ type: 'patch', value: { chefOpen: false, chefWidgetIndex: null } })}>×</button></div>
         <div id="chef-body" className="chef-body">
@@ -1948,7 +1962,7 @@ function App() {
 
       <CommandPalette open={state.paletteOpen} actions={dashboardActions} onClose={() => dispatch({ type: 'patch', value: { paletteOpen: false } })} />
       <AssumptionsDialog state={state} onClose={() => dispatch({ type: 'patch', value: { assumptionsWidgetIndex: null } })} onApply={applyAssumption} />
-      <InspectorDialog state={state} onClose={() => dispatch({ type: 'patch', value: { inspector: null } })} onFocusValue={focusOnInspectorValue} />
+      <InspectorDialog state={state} onClose={() => dispatch({ type: 'patch', value: { inspector: null } })} onFocusValue={applyEqualsFocus} />
       <DataHealthDialog
         open={state.healthOpen}
         health={state.parseHealth}

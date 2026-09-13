@@ -165,9 +165,9 @@ export function AlertsDialog({
     event.currentTarget.reset();
   };
   return (
-    <dialog id="alerts-dialog" className="mise-dialog insight-dialog" ref={ref} onClose={onClose}>
+    <dialog id="alerts-dialog" className="mise-dialog insight-dialog" ref={ref} aria-labelledby="alerts-title" onClose={onClose}>
       <div className="dialog-head">
-        <div><div className="eyebrow eyebrow-accent">While-open alerts</div><h2>Local metric thresholds</h2></div>
+        <div><div className="eyebrow eyebrow-accent">While-open alerts</div><h2 id="alerts-title">Local metric thresholds</h2></div>
         <CloseButton onClose={() => ref.current?.close()} />
       </div>
       <div className="dialog-body">
