@@ -136,6 +136,14 @@ emits content-hashed assets, and the PNG renderer is bundled as a lazy chunk.
   recipe inspector became workbench tabs and the theme picker moved to Notes.
 - Cmd/Ctrl+K opens a command palette that reaches every action and workbench
   tab; Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z, `/`, `P`, and Escape work on the dashboard.
+- Each widget card keeps a single `⋯` menu for view rows, assumptions, rationale,
+  rename, layout, Chef, and table export; meta stays as muted text.
+- Observations render after the leading KPI run and collapse past two notes so
+  KPI values stay above the fold.
+- Widget titles and the dashboard title rename inline (double-click, Enter, or
+  F2); empty titles revert and the change is undoable.
+- Widgets reorder by dragging a handle on fine pointers; keyboard users keep
+  Move earlier/later. Touch hides the handle and keeps the `⋯` trigger at 44px.
 
 ## Architecture boundaries
 
