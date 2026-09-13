@@ -25,7 +25,6 @@ export default function MobileActionBar({ actions }: { actions: DashboardAction[
     ...actions.filter(action => action.group === 'data'),
     ...actions.filter(action => action.id === 'present'),
     ...actions.filter(action => action.group === 'history'),
-    ...actions.filter(action => action.group === 'analyze'),
   ];
 
   return (
